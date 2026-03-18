@@ -100,6 +100,12 @@ For each control (`seg`, `depth`, `edge`):
   - Not used
   - Omitted from Cosmos payload
 
+## Performance Notes
+
+- If Python API import succeeds, models are initialized once and reused for the whole run.
+- If the tool must use subprocess mode, it executes the selected samples in one inference process to avoid reloading models per image.
+- If one sample causes an error in that subprocess run, the runner auto-splits internally to isolate bad samples and continue with the rest.
+
 ## Installation
 
 ```bash

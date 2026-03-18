@@ -3,9 +3,12 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +19,23 @@ logger = logging.getLogger(__name__)
 
 class CosmosRunnerError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class CosmosGenerationRequest:
+    image_path: Path
+    prompt: str
+    negative_prompt: str
+    seed: int
+    name: str
+    control_paths: dict[ControlName, Path | None]
+
+
+@dataclass
+class CosmosBatchResult:
+    outputs: dict[str, Path] = field(default_factory=dict)
+    errors: dict[str, Exception] = field(default_factory=dict)
+    elapsed_seconds: dict[str, float] = field(default_factory=dict)
 
 
 def add_cosmos_to_sys_path(repo_root: Path) -> None:
@@ -31,6 +51,29 @@ def _safe_instantiate(cls: type, payload: dict[str, Any]) -> Any:
         if key in signature.parameters:
             supported[key] = value
     return cls(**supported)
+
+
+def _looks_like_control_artifact(path: Path) -> bool:
+    stem = path.stem.lower()
+    tokens = (
+        "seg",
+        "depth",
+        "edge",
+        "mask",
+        "control",
+        "condition",
+        "hint",
+        "g_mask",
+        "vis",
+    )
+    return any(
+        stem.endswith(f"_{token}") or stem.endswith(f"-{token}") or f"_{token}_" in stem for token in tokens
+    )
+
+
+def _matches_request_output_name(path: Path, request_name: str) -> bool:
+    stem = path.stem
+    return stem == request_name or stem.startswith(f"{request_name}_") or stem.startswith(f"{request_name}-")
 
 
 class CosmosRunner:
@@ -69,6 +112,10 @@ class CosmosRunner:
                 config.repo_root,
                 exc,
             )
+
+    @property
+    def uses_python_api(self) -> bool:
+        return self.inference is not None
 
     def _build_setup_args(self) -> Any:
         if self._SetupArguments is None:
@@ -142,31 +189,27 @@ class CosmosRunner:
 
         return payload
 
-    def _build_inference_args(
-        self,
-        image_path: Path,
-        prompt: str,
-        negative_prompt: str,
-        seed: int,
-        name: str,
-        control_paths: dict[ControlName, Path | None],
-    ) -> Any:
-        if self._InferenceArguments is None:
-            raise CosmosRunnerError("Cosmos InferenceArguments is not available.")
-
-        raw_payload: dict[str, Any] = {
-            "name": name,
-            "prompt": prompt,
-            "negative_prompt": negative_prompt,
-            "video_path": str(image_path),
-            "seed": int(seed),
+    def _build_raw_payload(self, request: CosmosGenerationRequest) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "name": request.name,
+            "prompt": request.prompt,
+            "negative_prompt": request.negative_prompt,
+            "video_path": str(request.image_path),
+            "seed": int(request.seed),
             "guidance": self.config.guidance,
             "num_steps": self.config.num_steps,
             "resolution": self.config.resolution,
             "max_frames": self.config.max_frames,
             "num_video_frames_per_chunk": self.config.num_video_frames_per_chunk,
         }
-        raw_payload.update(self._build_control_payload(control_paths))
+        payload.update(self._build_control_payload(request.control_paths))
+        return payload
+
+    def _build_inference_args(self, request: CosmosGenerationRequest) -> Any:
+        if self._InferenceArguments is None:
+            raise CosmosRunnerError("Cosmos InferenceArguments is not available.")
+
+        raw_payload = self._build_raw_payload(request)
 
         try:
             return _safe_instantiate(self._InferenceArguments, raw_payload)
@@ -196,6 +239,28 @@ class CosmosRunner:
 
         raise CosmosRunnerError("Could not build InferenceArguments via constructor or from_files.")
 
+    def _call_generate(self, generator: Any, inference_payload: Any, output_dir: Path) -> Any:
+        attempts: list[tuple[str, dict[str, Any] | None]] = [
+            ("output_dir", {"output_dir": str(output_dir)}),
+            ("output_path", {"output_path": str(output_dir)}),
+            ("positional", None),
+        ]
+
+        last_error: Exception | None = None
+        for mode, kwargs in attempts:
+            try:
+                if kwargs is None:
+                    return generator(inference_payload, str(output_dir))
+                return generator(inference_payload, **kwargs)
+            except TypeError as exc:
+                last_error = exc
+                logger.debug("Cosmos generate call with %s failed: %s", mode, exc)
+            except Exception as exc:
+                # Runtime failures should bubble out immediately.
+                raise CosmosRunnerError(f"Cosmos generation failed with mode '{mode}': {exc}") from exc
+
+        raise CosmosRunnerError(f"Unable to call Cosmos generate with available signatures: {last_error}")
+
     def _extract_output_path(self, raw_out: Any, output_dir: Path, name: str) -> Path:
         candidates: list[Path] = []
 
@@ -223,39 +288,53 @@ class CosmosRunner:
 
         for candidate in candidates:
             maybe_path = candidate if candidate.is_absolute() else (output_dir / candidate)
-            if maybe_path.exists() and maybe_path.is_file():
+            if maybe_path.exists() and maybe_path.is_file() and not _looks_like_control_artifact(maybe_path):
                 return maybe_path.resolve()
 
-        def is_probably_generated(path: Path) -> bool:
-            lower = path.name.lower()
-            banned = [
-                "seg",
-                "depth",
-                "edge",
-                "mask",
-                "control",
-                "condition",
-                "hint",
-                "g_mask",
-                "vis",
-            ]
-            if any(token in lower for token in banned):
-                return False
-            return True
-
         globbed = sorted(
-            (p for p in output_dir.glob(f"{name}*") if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}),
+            (
+                p
+                for p in output_dir.iterdir()
+                if p.is_file()
+                and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
+                and _matches_request_output_name(p, name)
+            ),
             key=lambda p: p.stat().st_mtime,
         )
 
-        preferred = [p for p in globbed if is_probably_generated(p)]
+        preferred = [p for p in globbed if not _looks_like_control_artifact(p)]
         if preferred:
             return preferred[-1].resolve()
         if globbed:
-            # Fallback: return something, but this may be a control visualization.
             return globbed[-1].resolve()
 
         raise CosmosRunnerError(f"No output generated for sample '{name}'.")
+
+    def _run_single_request(self, request: CosmosGenerationRequest, output_dir: Path) -> Path:
+        if not request.image_path.exists():
+            raise CosmosRunnerError(f"Image does not exist: {request.image_path}")
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        if self.inference is not None:
+            try:
+                inference_args = self._build_inference_args(request)
+                generator = getattr(self.inference, "generate", None)
+                if callable(generator):
+                    raw_out = self._call_generate(generator, inference_args, output_dir)
+                    return self._extract_output_path(raw_out=raw_out, output_dir=output_dir, name=request.name)
+            except Exception as exc:
+                logger.warning(
+                    "Direct Python API generation failed for '%s'. Falling back to subprocess mode. Error: %s",
+                    request.name,
+                    exc,
+                )
+
+        generated_map = self._fallback_generate_many([request], output_dir=output_dir)
+        generated = generated_map.get(request.name)
+        if generated is None:
+            raise CosmosRunnerError(f"Fallback generation did not produce output for '{request.name}'.")
+        return generated
 
     def run_single(
         self,
@@ -267,87 +346,121 @@ class CosmosRunner:
         name: str,
         control_paths: dict[ControlName, Path | None],
     ) -> Path:
-        if not image_path.exists():
-            raise CosmosRunnerError(f"Image does not exist: {image_path}")
-
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        if self.inference is not None:
-            try:
-                inference_args = self._build_inference_args(
-                    image_path=image_path,
-                    prompt=prompt,
-                    negative_prompt=negative_prompt,
-                    seed=seed,
-                    name=name,
-                    control_paths=control_paths,
-                )
-                generator = getattr(self.inference, "generate", None)
-                if callable(generator):
-                    raw_out = generator(inference_args, output_path=str(output_dir))
-                    return self._extract_output_path(raw_out=raw_out, output_dir=output_dir, name=name)
-            except Exception as exc:
-                logger.warning(
-                    "Direct Python API generation failed for '%s'. Falling back to subprocess mode. Error: %s",
-                    name,
-                    exc,
-                )
-
-        return self._fallback_generate(
+        request = CosmosGenerationRequest(
             image_path=image_path,
             prompt=prompt,
             negative_prompt=negative_prompt,
-            output_dir=output_dir,
             seed=seed,
             name=name,
             control_paths=control_paths,
         )
+        return self._run_single_request(request=request, output_dir=output_dir)
 
-    def _fallback_generate(
+    def run_many(self, requests: list[CosmosGenerationRequest], output_dir: Path) -> CosmosBatchResult:
+        result = CosmosBatchResult()
+        if not requests:
+            return result
+
+        seen_names: set[str] = set()
+        for request in requests:
+            if request.name in seen_names:
+                raise CosmosRunnerError(f"Duplicated request name in batch: {request.name}")
+            seen_names.add(request.name)
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        if self.uses_python_api:
+            for request in requests:
+                start = time.perf_counter()
+                try:
+                    generated = self._run_single_request(request=request, output_dir=output_dir)
+                    result.outputs[request.name] = generated
+                except Exception as exc:
+                    result.errors[request.name] = exc
+                finally:
+                    result.elapsed_seconds[request.name] = time.perf_counter() - start
+            return result
+
+        # Subprocess-only mode: keep one long-lived inference process for the whole augmentation.
+        # This avoids reloading/downloading models per image.
+        logger.info("Running Cosmos subprocess in single-process mode for %d samples.", len(requests))
+        self._run_subprocess_chunk_with_retry(chunk=requests, output_dir=output_dir, result=result)
+
+        return result
+
+    def _run_subprocess_chunk_with_retry(
         self,
-        image_path: Path,
-        prompt: str,
-        negative_prompt: str,
+        chunk: list[CosmosGenerationRequest],
         output_dir: Path,
-        seed: int,
-        name: str,
-        control_paths: dict[ControlName, Path | None],
-    ) -> Path:
-        payload: dict[str, Any] = {
-            "name": name,
-            "prompt": prompt,
-            "negative_prompt": negative_prompt,
-            "video_path": str(image_path),
-            "seed": int(seed),
-            "guidance": self.config.guidance,
-            "num_steps": self.config.num_steps,
-            "resolution": self.config.resolution,
-            "max_frames": self.config.max_frames,
-            "num_video_frames_per_chunk": self.config.num_video_frames_per_chunk,
-        }
-        payload.update(self._build_control_payload(control_paths))
-
-        temp_path: Path | None = None
+        result: CosmosBatchResult,
+    ) -> None:
+        batch_start = time.perf_counter()
         try:
-            before = {
-                p.resolve()
-                for p in output_dir.glob("*")
-                if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
-            }
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".json",
-                delete=False,
-                encoding="utf-8",
-            ) as temp_file:
-                json.dump(payload, temp_file, indent=2)
-                temp_path = Path(temp_file.name)
+            outputs = self._fallback_generate_many(chunk, output_dir)
+            elapsed = time.perf_counter() - batch_start
+            per_sample = elapsed / len(chunk)
+
+            for request in chunk:
+                result.elapsed_seconds[request.name] = per_sample
+                output = outputs.get(request.name)
+                if output is None:
+                    result.errors[request.name] = CosmosRunnerError(
+                        f"Subprocess batch completed but no output was found for '{request.name}'."
+                    )
+                else:
+                    result.outputs[request.name] = output
+            return
+        except Exception as exc:
+            elapsed = time.perf_counter() - batch_start
+            if len(chunk) == 1:
+                request = chunk[0]
+                result.errors[request.name] = exc
+                result.elapsed_seconds[request.name] = elapsed
+                logger.error("Sample '%s' failed in subprocess mode: %s", request.name, exc)
+                return
+
+            mid = len(chunk) // 2
+            logger.warning(
+                "Subprocess batch of %d samples failed. Splitting into %d + %d to isolate bad samples.",
+                len(chunk),
+                mid,
+                len(chunk) - mid,
+            )
+            self._run_subprocess_chunk_with_retry(chunk[:mid], output_dir, result)
+            self._run_subprocess_chunk_with_retry(chunk[mid:], output_dir, result)
+
+    def _clear_existing_outputs(self, output_dir: Path, request_names: list[str]) -> None:
+        for name in request_names:
+            for candidate in output_dir.iterdir():
+                if (
+                    candidate.is_file()
+                    and candidate.suffix.lower() in {".png", ".jpg", ".jpeg"}
+                    and _matches_request_output_name(candidate, name)
+                ):
+                    candidate.unlink(missing_ok=True)
+
+    def _fallback_generate_many(self, requests: list[CosmosGenerationRequest], output_dir: Path) -> dict[str, Path]:
+        if not requests:
+            return {}
+
+        self._clear_existing_outputs(output_dir, [request.name for request in requests])
+        payload_dir = Path(tempfile.mkdtemp(prefix="cosmos_payloads_"))
+        payload_paths: list[Path] = []
+
+        try:
+            for idx, request in enumerate(requests):
+                payload = self._build_raw_payload(request)
+                safe_name = "".join(char if char.isalnum() or char in {"_", "-"} else "_" for char in request.name)
+                payload_path = payload_dir / f"{idx:05d}_{safe_name}.json"
+                with payload_path.open("w", encoding="utf-8") as file_handle:
+                    json.dump(payload, file_handle, indent=2)
+                payload_paths.append(payload_path)
 
             cmd = [
                 sys.executable,
                 "examples/inference.py",
                 "-i",
-                str(temp_path),
+                *[str(path) for path in payload_paths],
                 "-o",
                 str(output_dir),
             ]
@@ -363,61 +476,20 @@ class CosmosRunner:
             )
 
             if completed.returncode != 0:
-                # Keep the JSON payload around to make debugging control inputs easier.
                 raise CosmosRunnerError(
                     "Fallback subprocess generation failed.\n"
-                    f"Payload JSON kept at: {temp_path}\n"
+                    f"Payload JSON directory kept at: {payload_dir}\n"
                     f"Command: {' '.join(cmd)}\n"
                     f"stdout: {completed.stdout[-4000:]}\n"
                     f"stderr: {completed.stderr[-4000:]}"
                 )
 
-            after = {
-                p.resolve()
-                for p in output_dir.glob("*")
-                if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
-            }
-            new_files = sorted(after - before)
+            outputs: dict[str, Path] = {}
+            for request in requests:
+                outputs[request.name] = self._extract_output_path(raw_out=[], output_dir=output_dir, name=request.name)
 
-            def is_probably_generated(path: Path) -> bool:
-                lower = path.name.lower()
-                banned = [
-                    "seg",
-                    "depth",
-                    "edge",
-                    "mask",
-                    "control",
-                    "condition",
-                    "hint",
-                    "g_mask",
-                    "vis",
-                ]
-                if any(token in lower for token in banned):
-                    return False
-                return True
-
-            candidates = new_files or sorted(
-                p.resolve()
-                for p in output_dir.glob(f"{name}*")
-                if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
-            )
-            preferred = [p for p in candidates if is_probably_generated(p)]
-            pick_from = preferred or candidates
-            if not pick_from:
-                raise CosmosRunnerError(
-                    f"Fallback generation succeeded but no output file matched '{name}*' in {output_dir}"
-                )
-
-            # Heuristic: prefer the largest file among the chosen set.
-            chosen = max(pick_from, key=lambda p: p.stat().st_size)
-            return chosen.resolve()
-        finally:
-            # Only delete payload when the subprocess succeeded.
-            # On failure we keep it for post-mortem inspection.
-            if temp_path is not None and temp_path.exists():
-                # If we got here via an exception, Python is unwinding and the caller will see the path.
-                # If we got here normally, we should clean up.
-                import sys as _sys
-
-                if _sys.exc_info()[0] is None:
-                    temp_path.unlink(missing_ok=True)
+            shutil.rmtree(payload_dir, ignore_errors=True)
+            return outputs
+        except Exception:
+            # Keep payloads for debugging if this batch fails.
+            raise

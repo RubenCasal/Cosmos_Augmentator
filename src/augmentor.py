@@ -9,10 +9,10 @@ from tqdm import tqdm
 
 from .augmentation_profile import AugmentationProfile
 from .control_image_adapter import ControlImageAdapter
-from .cosmos_runner import CosmosRunner
+from .cosmos_runner import CosmosGenerationRequest, CosmosRunner
 from .dataset_scanner import scan_dataset
 from .metrics import AugmentationTiming, RunTiming, format_seconds
-from .types import CONTROL_NAMES, AugmentationJob, GlobalConfig, ImageSample
+from .types import CONTROL_NAMES, ControlName, AugmentationJob, GlobalConfig, ImageSample
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ class DatasetAugmentor:
         self.samples = scan_dataset(dataset=config.dataset, controls=config.cosmos.controls)
         self.cosmos_runner = CosmosRunner(config.cosmos)
         self.control_adapter = ControlImageAdapter(config)
+        self._adapted_control_cache: dict[tuple[ControlName, str], Path] = {}
 
         controls = config.cosmos.controls.as_dict()
         logger.info(
@@ -89,6 +90,25 @@ class DatasetAugmentor:
             dst.unlink()
         shutil.copy2(src, dst)
 
+    def _adapt_control_paths(self, control_paths: dict[ControlName, Path | None]) -> dict[ControlName, Path | None]:
+        adapted: dict[ControlName, Path | None] = {}
+        for control_name, source_path in control_paths.items():
+            if source_path is None:
+                adapted[control_name] = None
+                continue
+
+            source_resolved = str(source_path.resolve())
+            cache_key = (control_name, source_resolved)
+            cached = self._adapted_control_cache.get(cache_key)
+            if cached is not None:
+                adapted[control_name] = cached
+                continue
+
+            converted = self.control_adapter.adapt_external_control_path(control_name, source_path)
+            self._adapted_control_cache[cache_key] = converted
+            adapted[control_name] = converted
+        return adapted
+
     def _materialize_job(
         self,
         job: AugmentationJob,
@@ -111,6 +131,146 @@ class DatasetAugmentor:
             if src_control is None:
                 continue
             self._copy_file(src_control, dst_dir / job.image_name)
+
+    def _run_with_python_api(
+        self,
+        jobs: list[AugmentationJob],
+        profile: AugmentationProfile,
+        temp_output: Path,
+        aug_images: Path,
+        aug_labels: Path,
+        control_dirs: dict[str, Path],
+        aug_timing: AugmentationTiming,
+    ) -> None:
+        for idx, job in enumerate(tqdm(jobs, desc=f"Generating {profile.name}", unit="image"), start=1):
+            image_start = time.perf_counter()
+            try:
+                generated_path = self.cosmos_runner.run_single(
+                    image_path=job.image_path,
+                    prompt=job.prompt,
+                    negative_prompt=job.negative_prompt,
+                    output_dir=temp_output,
+                    seed=job.seed,
+                    name=job.request_name,
+                    control_paths=self._adapt_control_paths(job.control_paths),
+                )
+                self._materialize_job(
+                    job=job,
+                    generated_path=generated_path,
+                    aug_images=aug_images,
+                    aug_labels=aug_labels,
+                    control_dirs=control_dirs,
+                )
+
+                elapsed = time.perf_counter() - image_start
+                aug_timing.record_success(job.image_name, elapsed)
+                logger.info(
+                    "[img %d/%d][%s] %.2fs | %s",
+                    idx,
+                    len(jobs),
+                    profile.name,
+                    elapsed,
+                    job.image_name,
+                )
+            except Exception as exc:
+                elapsed = time.perf_counter() - image_start
+                aug_timing.record_failure(job.image_name, elapsed, exc)
+                logger.exception(
+                    "[img %d/%d][%s] FAILED in %.2fs | %s",
+                    idx,
+                    len(jobs),
+                    profile.name,
+                    elapsed,
+                    job.image_name,
+                )
+
+    def _run_with_subprocess_batches(
+        self,
+        jobs: list[AugmentationJob],
+        profile: AugmentationProfile,
+        temp_output: Path,
+        aug_images: Path,
+        aug_labels: Path,
+        control_dirs: dict[str, Path],
+        aug_timing: AugmentationTiming,
+    ) -> None:
+        requests: list[CosmosGenerationRequest] = []
+        for job in jobs:
+            request = CosmosGenerationRequest(
+                image_path=job.image_path,
+                prompt=job.prompt,
+                negative_prompt=job.negative_prompt,
+                seed=job.seed,
+                name=job.request_name,
+                control_paths=self._adapt_control_paths(job.control_paths),
+            )
+            requests.append(request)
+
+        logger.info(
+            "Generating %d samples for '%s' in single-process subprocess mode.",
+            len(requests),
+            profile.name,
+        )
+        batch_result = self.cosmos_runner.run_many(requests=requests, output_dir=temp_output)
+
+        for idx, job in enumerate(jobs, start=1):
+            elapsed = batch_result.elapsed_seconds.get(job.request_name, 0.0)
+            error = batch_result.errors.get(job.request_name)
+            if error is not None:
+                aug_timing.record_failure(job.image_name, elapsed, error)
+                logger.error(
+                    "[img %d/%d][%s] FAILED in %.2fs | %s | %s",
+                    idx,
+                    len(jobs),
+                    profile.name,
+                    elapsed,
+                    job.image_name,
+                    error,
+                )
+                continue
+
+            generated_path = batch_result.outputs.get(job.request_name)
+            if generated_path is None:
+                error = RuntimeError(f"No generated path found for request '{job.request_name}'.")
+                aug_timing.record_failure(job.image_name, elapsed, error)
+                logger.error(
+                    "[img %d/%d][%s] FAILED in %.2fs | %s | %s",
+                    idx,
+                    len(jobs),
+                    profile.name,
+                    elapsed,
+                    job.image_name,
+                    error,
+                )
+                continue
+
+            try:
+                self._materialize_job(
+                    job=job,
+                    generated_path=generated_path,
+                    aug_images=aug_images,
+                    aug_labels=aug_labels,
+                    control_dirs=control_dirs,
+                )
+                aug_timing.record_success(job.image_name, elapsed)
+                logger.info(
+                    "[img %d/%d][%s] %.2fs | %s",
+                    idx,
+                    len(jobs),
+                    profile.name,
+                    elapsed,
+                    job.image_name,
+                )
+            except Exception as exc:
+                aug_timing.record_failure(job.image_name, elapsed, exc)
+                logger.exception(
+                    "[img %d/%d][%s] FAILED in %.2fs | %s",
+                    idx,
+                    len(jobs),
+                    profile.name,
+                    elapsed,
+                    job.image_name,
+                )
 
     def run_augmentations(self) -> None:
         output_root = Path(self.config.dataset.output_root)
@@ -143,54 +303,26 @@ class DatasetAugmentor:
 
             aug_timing = AugmentationTiming(name=profile.name)
             try:
-                for idx, job in enumerate(tqdm(jobs, desc=f"Generating {profile.name}", unit="image"), start=1):
-                    image_start = time.perf_counter()
-                    try:
-                        generated_path = self.cosmos_runner.run_single(
-                            image_path=job.image_path,
-                            prompt=job.prompt,
-                            negative_prompt=job.negative_prompt,
-                            output_dir=temp_output,
-                            seed=job.seed,
-                            name=job.request_name,
-                            control_paths={
-                                control_name: (
-                                    None
-                                    if path is None
-                                    else self.control_adapter.adapt_external_control_path(control_name, path)
-                                )
-                                for control_name, path in job.control_paths.items()
-                            },
-                        )
-                        self._materialize_job(
-                            job=job,
-                            generated_path=generated_path,
-                            aug_images=aug_images,
-                            aug_labels=aug_labels,
-                            control_dirs=control_dirs,
-                        )
-
-                        elapsed = time.perf_counter() - image_start
-                        aug_timing.record_success(job.image_name, elapsed)
-                        logger.info(
-                            "[img %d/%d][%s] %.2fs | %s",
-                            idx,
-                            len(jobs),
-                            profile.name,
-                            elapsed,
-                            job.image_name,
-                        )
-                    except Exception as exc:
-                        elapsed = time.perf_counter() - image_start
-                        aug_timing.record_failure(job.image_name, elapsed, exc)
-                        logger.exception(
-                            "[img %d/%d][%s] FAILED in %.2fs | %s",
-                            idx,
-                            len(jobs),
-                            profile.name,
-                            elapsed,
-                            job.image_name,
-                        )
+                if self.cosmos_runner.uses_python_api:
+                    self._run_with_python_api(
+                        jobs=jobs,
+                        profile=profile,
+                        temp_output=temp_output,
+                        aug_images=aug_images,
+                        aug_labels=aug_labels,
+                        control_dirs=control_dirs,
+                        aug_timing=aug_timing,
+                    )
+                else:
+                    self._run_with_subprocess_batches(
+                        jobs=jobs,
+                        profile=profile,
+                        temp_output=temp_output,
+                        aug_images=aug_images,
+                        aug_labels=aug_labels,
+                        control_dirs=control_dirs,
+                        aug_timing=aug_timing,
+                    )
             finally:
                 shutil.rmtree(temp_output, ignore_errors=True)
 
