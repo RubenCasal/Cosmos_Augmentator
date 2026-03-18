@@ -8,6 +8,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from .augmentation_profile import AugmentationProfile
+from .control_image_adapter import ControlImageAdapter
 from .cosmos_runner import CosmosRunner
 from .dataset_scanner import scan_dataset
 from .metrics import AugmentationTiming, RunTiming, format_seconds
@@ -21,6 +22,7 @@ class DatasetAugmentor:
         self.config = config
         self.samples = scan_dataset(dataset=config.dataset, controls=config.cosmos.controls)
         self.cosmos_runner = CosmosRunner(config.cosmos)
+        self.control_adapter = ControlImageAdapter(config)
 
         controls = config.cosmos.controls.as_dict()
         logger.info(
@@ -44,6 +46,7 @@ class DatasetAugmentor:
                     seed=profile.seed_base + idx,
                     image_name=sample.name,
                     image_path=sample.image_path,
+                    gt_seg_path=sample.gt_seg_path,
                     control_paths=sample.control_paths,
                     prompt=profile.prompt,
                     negative_prompt=profile.negative_prompt,
@@ -56,15 +59,17 @@ class DatasetAugmentor:
         self,
         output_root: Path,
         output_dir_name: str,
-    ) -> tuple[Path, dict[str, Path], Path]:
+    ) -> tuple[Path, Path, dict[str, Path], Path]:
         aug_root = output_root / output_dir_name
         aug_images = aug_root / self.config.dataset.image_subdir
+        aug_labels = aug_root / self.config.dataset.label_subdir
         temp_output = aug_root / "_cosmos_output"
 
         if temp_output.exists():
             shutil.rmtree(temp_output)
 
         aug_images.mkdir(parents=True, exist_ok=True)
+        aug_labels.mkdir(parents=True, exist_ok=True)
         temp_output.mkdir(parents=True, exist_ok=True)
 
         control_dirs: dict[str, Path] = {}
@@ -76,7 +81,7 @@ class DatasetAugmentor:
             dst_dir.mkdir(parents=True, exist_ok=True)
             control_dirs[control_name] = dst_dir
 
-        return aug_images, control_dirs, temp_output
+        return aug_images, aug_labels, control_dirs, temp_output
 
     @staticmethod
     def _copy_file(src: Path, dst: Path) -> None:
@@ -89,6 +94,7 @@ class DatasetAugmentor:
         job: AugmentationJob,
         generated_path: Path,
         aug_images: Path,
+        aug_labels: Path,
         control_dirs: dict[str, Path],
     ) -> None:
         if not generated_path.exists():
@@ -96,6 +102,9 @@ class DatasetAugmentor:
 
         image_dst = aug_images / job.image_name
         self._copy_file(generated_path, image_dst)
+
+        label_dst = aug_labels / job.image_name
+        self._copy_file(job.gt_seg_path, label_dst)
 
         for control_name, dst_dir in control_dirs.items():
             src_control = job.control_paths.get(control_name)
@@ -127,7 +136,7 @@ class DatasetAugmentor:
                 run_timing.add(AugmentationTiming(name=profile.name))
                 continue
 
-            aug_images, control_dirs, temp_output = self._prepare_output_dirs_for_profile(
+            aug_images, aug_labels, control_dirs, temp_output = self._prepare_output_dirs_for_profile(
                 output_root=output_root,
                 output_dir_name=profile.output_dir_name,
             )
@@ -144,12 +153,20 @@ class DatasetAugmentor:
                             output_dir=temp_output,
                             seed=job.seed,
                             name=job.request_name,
-                            control_paths=job.control_paths,
+                            control_paths={
+                                control_name: (
+                                    None
+                                    if path is None
+                                    else self.control_adapter.adapt_external_control_path(control_name, path)
+                                )
+                                for control_name, path in job.control_paths.items()
+                            },
                         )
                         self._materialize_job(
                             job=job,
                             generated_path=generated_path,
                             aug_images=aug_images,
+                            aug_labels=aug_labels,
                             control_dirs=control_dirs,
                         )
 

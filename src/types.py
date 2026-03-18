@@ -14,6 +14,7 @@ class ControlConfig:
     mode: ControlMode
     weight: float
     subdir: str
+    encoding: str | None = None
 
     @property
     def is_disabled(self) -> bool:
@@ -63,7 +64,9 @@ class DatasetConfig:
     output_root: Path
     original_dir: str
     image_subdir: str
+    label_subdir: str
     image_ext: str
+    cache_dir: str = ".cosmos_control_cache"
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,7 @@ class LoggingConfig:
 class ImageSample:
     name: str
     image_path: Path
+    gt_seg_path: Path
     control_paths: dict[ControlName, Path | None]
 
 
@@ -97,6 +101,7 @@ class AugmentationJob:
     seed: int
     image_name: str
     image_path: Path
+    gt_seg_path: Path
     control_paths: dict[ControlName, Path | None]
     prompt: str
     negative_prompt: str

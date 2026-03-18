@@ -55,6 +55,7 @@ cosmos:
       mode: external      # disabled | external | on_the_fly
       weight: 1.0
       subdir: "labels"
+      encoding: "rgb"     # rgb (colorize=true) | id (colorize=false)
     depth:
       mode: on_the_fly    # disabled | external | on_the_fly
       weight: 0.9
@@ -69,7 +70,9 @@ dataset:
   output_root: "/path/to/output_dataset"
   original_dir: "."
   image_subdir: "images"
+  label_subdir: "labels"
   image_ext: ".png"
+  cache_dir: ".cosmos_control_cache"
 
 augmentations:
   - name: "sunset"

@@ -226,10 +226,33 @@ class CosmosRunner:
             if maybe_path.exists() and maybe_path.is_file():
                 return maybe_path.resolve()
 
+        def is_probably_generated(path: Path) -> bool:
+            lower = path.name.lower()
+            banned = [
+                "seg",
+                "depth",
+                "edge",
+                "mask",
+                "control",
+                "condition",
+                "hint",
+                "g_mask",
+                "vis",
+            ]
+            if any(token in lower for token in banned):
+                return False
+            return True
+
         globbed = sorted(
-            p for p in output_dir.glob(f"{name}*") if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
+            (p for p in output_dir.glob(f"{name}*") if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}),
+            key=lambda p: p.stat().st_mtime,
         )
+
+        preferred = [p for p in globbed if is_probably_generated(p)]
+        if preferred:
+            return preferred[-1].resolve()
         if globbed:
+            # Fallback: return something, but this may be a control visualization.
             return globbed[-1].resolve()
 
         raise CosmosRunnerError(f"No output generated for sample '{name}'.")
@@ -306,6 +329,11 @@ class CosmosRunner:
 
         temp_path: Path | None = None
         try:
+            before = {
+                p.resolve()
+                for p in output_dir.glob("*")
+                if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
+            }
             with tempfile.NamedTemporaryFile(
                 mode="w",
                 suffix=".json",
@@ -335,22 +363,61 @@ class CosmosRunner:
             )
 
             if completed.returncode != 0:
+                # Keep the JSON payload around to make debugging control inputs easier.
                 raise CosmosRunnerError(
                     "Fallback subprocess generation failed.\n"
+                    f"Payload JSON kept at: {temp_path}\n"
                     f"Command: {' '.join(cmd)}\n"
                     f"stdout: {completed.stdout[-4000:]}\n"
                     f"stderr: {completed.stderr[-4000:]}"
                 )
 
-            candidates = sorted(
-                p for p in output_dir.glob(f"{name}*") if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
+            after = {
+                p.resolve()
+                for p in output_dir.glob("*")
+                if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
+            }
+            new_files = sorted(after - before)
+
+            def is_probably_generated(path: Path) -> bool:
+                lower = path.name.lower()
+                banned = [
+                    "seg",
+                    "depth",
+                    "edge",
+                    "mask",
+                    "control",
+                    "condition",
+                    "hint",
+                    "g_mask",
+                    "vis",
+                ]
+                if any(token in lower for token in banned):
+                    return False
+                return True
+
+            candidates = new_files or sorted(
+                p.resolve()
+                for p in output_dir.glob(f"{name}*")
+                if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}
             )
-            if not candidates:
+            preferred = [p for p in candidates if is_probably_generated(p)]
+            pick_from = preferred or candidates
+            if not pick_from:
                 raise CosmosRunnerError(
                     f"Fallback generation succeeded but no output file matched '{name}*' in {output_dir}"
                 )
 
-            return candidates[-1].resolve()
+            # Heuristic: prefer the largest file among the chosen set.
+            chosen = max(pick_from, key=lambda p: p.stat().st_size)
+            return chosen.resolve()
         finally:
-            if temp_path is not None:
-                temp_path.unlink(missing_ok=True)
+            # Only delete payload when the subprocess succeeded.
+            # On failure we keep it for post-mortem inspection.
+            if temp_path is not None and temp_path.exists():
+                # If we got here via an exception, Python is unwinding and the caller will see the path.
+                # If we got here normally, we should clean up.
+                import sys as _sys
+
+                if _sys.exc_info()[0] is None:
+                    temp_path.unlink(missing_ok=True)

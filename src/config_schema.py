@@ -102,7 +102,17 @@ def _parse_single_control(raw: object, control_name: str) -> ControlConfig:
     }[control_name]
     subdir = _optional_str(control_map.get("subdir"), f"{field}.subdir") or default_subdir
 
-    return ControlConfig(mode=mode, weight=weight, subdir=subdir)
+    encoding: str | None = None
+    encoding_raw = _optional_str(control_map.get("encoding"), f"{field}.encoding")
+    if encoding_raw is not None:
+        encoding = encoding_raw.lower()
+        allowed = {"rgb"}
+        if control_name == "seg":
+            allowed = {"rgb", "id"}
+        if encoding not in allowed:
+            raise ConfigError(f"{field}.encoding must be one of: {', '.join(sorted(allowed))}")
+
+    return ControlConfig(mode=mode, weight=weight, subdir=subdir, encoding=encoding)
 
 
 def _parse_controls(cosmos_data: dict, dataset_data: dict) -> CosmosControls:
@@ -128,6 +138,7 @@ def _parse_controls(cosmos_data: dict, dataset_data: dict) -> CosmosControls:
             mode="external",
             weight=_optional_float(cosmos_data.get("seg_control_weight"), "cosmos.seg_control_weight", 0.6),
             subdir=seg_subdir,
+            encoding=None,
         ),
         depth=ControlConfig(mode="disabled", weight=1.0, subdir="depth"),
         edge=ControlConfig(
@@ -187,7 +198,9 @@ def load_config(path: Path) -> GlobalConfig:
         output_root=Path(output_root_str).expanduser().resolve(),
         original_dir=_optional_str(dataset_data.get("original_dir"), "dataset.original_dir") or ".",
         image_subdir=_optional_str(dataset_data.get("image_subdir"), "dataset.image_subdir") or "images",
+        label_subdir=_optional_str(dataset_data.get("label_subdir"), "dataset.label_subdir") or "labels",
         image_ext=_optional_str(dataset_data.get("image_ext"), "dataset.image_ext") or ".png",
+        cache_dir=_optional_str(dataset_data.get("cache_dir"), "dataset.cache_dir") or ".cosmos_control_cache",
     )
 
     if not cosmos.repo_root.is_dir():
@@ -200,6 +213,10 @@ def load_config(path: Path) -> GlobalConfig:
     images_dir = original_root / dataset.image_subdir
     if not images_dir.is_dir():
         raise ConfigError(f"Missing images dir: {images_dir}")
+
+    labels_dir = original_root / dataset.label_subdir
+    if not labels_dir.is_dir():
+        raise ConfigError(f"Missing ground-truth segmentation labels dir: {labels_dir}")
 
     for control_name, control in cosmos.controls.as_dict().items():
         if not control.is_external:

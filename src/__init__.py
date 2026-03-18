@@ -5,6 +5,7 @@ __all__ = [
     "augmentation_profile",
     "cli",
     "config_schema",
+    "control_image_adapter",
     "cosmos_runner",
     "dataset_scanner",
     "logging_utils",

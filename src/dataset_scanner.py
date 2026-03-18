@@ -21,9 +21,12 @@ def _list_images(images_dir: Path, image_ext: str) -> list[Path]:
 def scan_dataset(dataset: DatasetConfig, controls: CosmosControls) -> list[ImageSample]:
     original_root = dataset.input_root / dataset.original_dir
     images_dir = original_root / dataset.image_subdir
+    labels_dir = original_root / dataset.label_subdir
 
     if not images_dir.is_dir():
         raise DatasetScanError(f"Images directory not found: {images_dir}")
+    if not labels_dir.is_dir():
+        raise DatasetScanError(f"Ground-truth labels directory not found: {labels_dir}")
 
     controls_map = controls.as_dict()
     external_dirs: dict[ControlName, Path] = {}
@@ -42,9 +45,14 @@ def scan_dataset(dataset: DatasetConfig, controls: CosmosControls) -> list[Image
     image_files = _list_images(images_dir=images_dir, image_ext=dataset.image_ext)
 
     missing_by_control: dict[ControlName, list[str]] = {name: [] for name in external_dirs}
+    missing_gt_labels: list[str] = []
     samples: list[ImageSample] = []
 
     for image_path in image_files:
+        gt_label_path = labels_dir / image_path.name
+        if not gt_label_path.exists():
+            missing_gt_labels.append(image_path.name)
+
         control_paths: dict[ControlName, Path | None] = {}
 
         for control_name in CONTROL_NAMES:
@@ -64,9 +72,15 @@ def scan_dataset(dataset: DatasetConfig, controls: CosmosControls) -> list[Image
             ImageSample(
                 name=image_path.name,
                 image_path=image_path.resolve(),
+                gt_seg_path=gt_label_path.resolve(),
                 control_paths=control_paths,
             )
         )
+
+    if missing_gt_labels:
+        preview = ", ".join(missing_gt_labels[:10])
+        suffix = "..." if len(missing_gt_labels) > 10 else ""
+        raise DatasetScanError(f"Missing ground-truth seg label files for images: {preview}{suffix}")
 
     missing_messages: list[str] = []
     for control_name, missing in missing_by_control.items():
