@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cosmos_augmentor"
+version = "0.1.0"
+description = "Dataset augmentation automation using NVIDIA Cosmos-Transfer2.5"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "PyYAML>=6.0",
+  "Pillow>=10.0",
+  "tqdm>=4.66",
+]
+
+[tool.setuptools]
+packages = ["cosmos_augmentor"]
+package-dir = {"cosmos_augmentor" = "src"}

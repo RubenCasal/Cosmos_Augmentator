@@ -1,0 +1,275 @@
+cosmos:
+  repo_root: "/home/airbots-workstation/rcasal/cosmos-transfer2.5"
+  # IMPORTANTE:
+  # Si tu versión local de Cosmos exige model explícito, descomenta y pon
+  # el string exacto que use tu instalación.
+  # model: "your_exact_local_model_string"
+
+  model_variant: "edge"
+  model_distilled: false
+
+  # Mantener ambos controles como en los ejemplos oficiales
+  use_edge_control: true
+  seg_control_weight: 0.9
+
+  disable_guardrails: true
+  resolution: "720"
+  guidance: 4
+  num_steps: 36
+  max_frames: 1
+  num_video_frames_per_chunk: 1
+
+dataset:
+  root: "/home/airbots-workstation/Documents/isaac-sim-standalone-5.1.0-linux-x86_64/rozas_basler_stealth/output/2026_03_17_08_33_40/pinhole_dl_data_output/1"
+  original_dir: "."
+  image_subdir: "images"
+  label_subdir: "labels"
+  image_ext: ".png"
+  segmentation:
+    # "rgb" para máscaras colorizadas (colorize=true)
+    # "id" para máscaras por clase-id (colorize=false)
+    encoding: "rgb"
+    # Si encoding="id", genera una copia RGB temporal para Cosmos.
+    convert_ids_to_rgb_for_cosmos: true
+    converted_cache_dir: ".cosmos_seg_rgb_cache"
+
+augmentations:
+  # --------------------------------------------------------------------------
+  # 1) OVERCAST DAY
+  # Seguro para labels: cambia iluminación global y contraste, no geometría.
+  # --------------------------------------------------------------------------
+  - name: "overcast"
+    output_dir: "dataset_overcast"
+    fraction: 0.1
+    seed_base: 100
+    prompt: >
+      Photorealistic top-down drone view of this exact scene on a cloudy overcast day,
+      with soft diffuse lighting, muted contrast, neutral colors, soft or nearly absent
+      shadows, and a realistic natural atmosphere, while strictly preserving the exact
+      spatial layout, road boundaries, vegetation regions, building footprints and all
+      object silhouettes.
+    negative_prompt: >
+      sunny harsh light, sunset colors, deep night, snow, fog, heavy rain, destroyed
+      buildings, changed road geometry, added or removed objects, cartoon, CGI, game
+      graphics, low detail, flat shading, oversmoothed, synthetic render, unrealistic colors
+
+  # --------------------------------------------------------------------------
+  # 2) HARSH SUNNY NOON
+  # Útil para robustez a altas luces y sombras duras.
+  # --------------------------------------------------------------------------
+  - name: "harsh_sunny_noon"
+    output_dir: "dataset_harsh_sunny_noon"
+    fraction: 0.1
+    seed_base: 200
+    prompt: >
+      Photorealistic top-down drone view of this exact scene at bright sunny noon, with
+      strong overhead sunlight, crisp hard shadows, higher local contrast and realistic
+      bright daylight appearance, while strictly preserving the exact spatial layout,
+      road edges, vegetation areas, buildings and object silhouettes.
+    negative_prompt: >
+      sunset lighting, blue hour, night, fog, snow, rain, destroyed infrastructure,
+      changed geometry, added vehicles, missing objects, cartoon, CGI, game graphics,
+      low detail, flat shading, oversmoothed, synthetic render, unrealistic colors
+
+  # --------------------------------------------------------------------------
+  # 3) NIGHT
+  # Seguro si no introduces objetos nuevos ni oclusión extrema.
+  # --------------------------------------------------------------------------
+  - name: "night"
+    output_dir: "dataset_night"
+    fraction: 0.1
+    seed_base: 300
+    prompt: >
+      Photorealistic top-down drone night view of this exact scene, with dark terrain
+      and roads, subtle moonlight or sparse artificial illumination, realistic low-light
+      sensor noise, reduced visibility and a believable night atmosphere, while strictly
+      preserving the exact spatial layout, road boundaries, vegetation regions, building
+      footprints and all object silhouettes.
+    negative_prompt: >
+      daylight, bright sky, sunset colors, heavy fog, snow, destroyed environment,
+      altered road layout, added or removed objects, cartoon, CGI, game graphics, low
+      detail, flat shading, oversmoothed, synthetic render, unrealistic colors
+
+  # --------------------------------------------------------------------------
+  # 4) SUNSET
+  # Diferenciado claramente de night y blue hour.
+  # --------------------------------------------------------------------------
+  - name: "sunset"
+    output_dir: "dataset_sunset"
+    fraction: 0.1
+    seed_base: 400
+    prompt: >
+      Photorealistic top-down drone view of this exact scene at sunset, with warm orange
+      and golden light, long soft shadows, slightly darker terrain and vegetation, and
+      realistic atmospheric haze toward the distance, while strictly preserving the exact
+      spatial layout, road boundaries, vegetation regions, building footprints and all
+      object silhouettes.
+    negative_prompt: >
+      midday lighting, deep night darkness, rain, snow, dense fog, altered road shapes,
+      destroyed buildings, added or removed objects, cartoon, CGI, game graphics, low
+      detail, flat shading, oversmoothed, synthetic render, unrealistic colors
+
+  # --------------------------------------------------------------------------
+  # 5) DUSK / BLUE HOUR
+  # Separado de sunset y night.
+  # --------------------------------------------------------------------------
+  - name: "dusk_blue_hour"
+    output_dir: "dataset_dusk_blue_hour"
+    fraction: 0.1
+    seed_base: 500
+    prompt: >
+      Photorealistic top-down drone view of this exact scene at dusk during blue hour,
+      with the sun already below the horizon, cool blue and purple ambient tones, low
+      contrast illumination, slightly darkened terrain and subtle artificial lights, while
+      strictly preserving the exact spatial layout, road boundaries, vegetation regions,
+      building footprints and all object silhouettes.
+    negative_prompt: >
+      bright midday sunlight, fully dark night, heavy rain, snowstorm, destroyed scenery,
+      changed geometry, added or removed objects, cartoon, CGI, game graphics, low detail,
+      flat shading, oversmoothed, synthetic render, unrealistic colors
+
+  # --------------------------------------------------------------------------
+  # 6) LIGHT FOG
+  # Niebla moderada, no demasiado densa para no invalidar bordes.
+  # --------------------------------------------------------------------------
+  - name: "fog"
+    output_dir: "dataset_fog"
+    fraction: 0.1
+    seed_base: 600
+    prompt: >
+      Photorealistic top-down drone view of this exact scene covered by light morning fog,
+      with moderately reduced visibility, distant areas fading into a soft white-grey haze,
+      muted colors and diffuse lighting, while strictly preserving the exact spatial layout,
+      road boundaries, vegetation regions, building footprints and all object silhouettes.
+    negative_prompt: >
+      crystal clear visibility, strong hard shadows, very dense opaque fog, snow, destroyed
+      environment, changed road layout, added or removed objects, cartoon, CGI, game
+      graphics, low detail, flat shading, oversmoothed, synthetic render, unrealistic colors
+
+  # --------------------------------------------------------------------------
+  # 7) RAIN
+  # Mojado realista sin inundación fuerte ni deformaciones.
+  # --------------------------------------------------------------------------
+  - name: "rain"
+    output_dir: "dataset_rain"
+    fraction: 0.1
+    seed_base: 700
+    prompt: >
+      Photorealistic top-down drone view of this exact scene during rainy weather, with wet
+      reflective roads, darker wet soil, rain-darkened vegetation, overcast lighting and a
+      realistic low-contrast rainy atmosphere, while strictly preserving the exact spatial
+      layout, road boundaries, vegetation regions, building footprints and all object silhouettes.
+    negative_prompt: >
+      dry ground, sunny sky, strong hard shadows, deep snow, destruction, standing floodwater
+      covering roads, changed road geometry, added or removed objects, cartoon, CGI, game
+      graphics, low detail, flat shading, oversmoothed, synthetic render, unrealistic colors
+
+  # --------------------------------------------------------------------------
+  # 8) AFTER RAIN
+  # Diferente de rain: ya no está lloviendo, pero todo está mojado.
+  # --------------------------------------------------------------------------
+  - name: "after_rain"
+    output_dir: "dataset_after_rain"
+    fraction: 0.1
+    seed_base: 800
+    prompt: >
+      Photorealistic top-down drone view of this exact scene shortly after rain, with wet
+      reflective roads, darker moist terrain, subtle puddles in low areas, softened contrast
+      and realistic overcast post-rain lighting, while strictly preserving the exact spatial
+      layout, road boundaries, vegetation regions, building footprints and all object silhouettes.
+    negative_prompt: >
+      active heavy rainfall, sunny dry ground, snow, destruction, flooded roads, changed
+      geometry, added or removed objects, cartoon, CGI, game graphics, low detail, flat
+      shading, oversmoothed, synthetic render, unrealistic colors
+
+  # --------------------------------------------------------------------------
+  # 9) WINTER SNOW
+  # Nieve visible pero sin tapar completamente la semántica.
+  # --------------------------------------------------------------------------
+  - name: "winter_snow"
+    output_dir: "dataset_winter_snow"
+    fraction: 0.1
+    seed_base: 900
+    prompt: >
+      Photorealistic top-down drone view of this exact scene in winter after snowfall, with
+      a visible snow layer covering much of the ground, cold bluish lighting, softened
+      contrast and a realistic winter atmosphere, while strictly preserving the exact spatial
+      layout, road boundaries, vegetation regions, building footprints and all object silhouettes.
+    negative_prompt: >
+      lush green summer look, dry dirt terrain, autumn colors, warm sunset light, snow
+      completely burying roads or objects, destroyed environment, changed geometry, added or
+      removed objects, cartoon, CGI, game graphics, low detail, flat shading, oversmoothed,
+      synthetic render, unrealistic colors
+
+  # --------------------------------------------------------------------------
+  # 10) FROST MORNING
+  # Invierno ligero, diferente de winter_snow.
+  # --------------------------------------------------------------------------
+  - name: "frost_morning"
+    output_dir: "dataset_frost_morning"
+    fraction: 0.1
+    seed_base: 1000
+    prompt: >
+      Photorealistic top-down drone view of this exact scene on a cold frosty morning, with
+      pale desaturated terrain, light frost or very thin snow patches, cold bluish ambient
+      light and subtle winter desaturation, while strictly preserving the exact spatial
+      layout, road boundaries, vegetation regions, building footprints and all object silhouettes.
+    negative_prompt: >
+      thick snow cover, lush summer vegetation, warm golden sunset light, destruction,
+      changed road layout, added or removed objects, cartoon, CGI, game graphics, low detail,
+      flat shading, oversmoothed, synthetic render, unrealistic colors
+
+  # --------------------------------------------------------------------------
+  # 11) AUTUMN
+  # Muy útil y faltaba en tu set.
+  # --------------------------------------------------------------------------
+  - name: "autumn"
+    output_dir: "dataset_autumn"
+    fraction: 0.1
+    seed_base: 1100
+    prompt: >
+      Photorealistic top-down drone view of this exact scene during autumn, with vegetation
+      showing realistic yellow, orange and brown seasonal tones, slightly reduced foliage
+      density appearance and soft natural daylight, while strictly preserving the exact
+      spatial layout, road boundaries, vegetation regions, building footprints and all
+      object silhouettes.
+    negative_prompt: >
+      deep winter snow, lush saturated summer green, destroyed buildings, changed geometry,
+      added or removed trees or objects, cartoon, CGI, game graphics, low detail, flat
+      shading, oversmoothed, synthetic render, unrealistic colors
+
+  # --------------------------------------------------------------------------
+  # 12) DRY CLIMATE
+  # Aridez global sin convertirlo en desierto extremo.
+  # --------------------------------------------------------------------------
+  - name: "dry_climate"
+    output_dir: "dataset_dry_climate"
+    fraction: 0.1
+    seed_base: 1200
+    prompt: >
+      Photorealistic top-down drone view of this exact scene in a dry climate, with pale
+      sun-bleached terrain, sparse dry vegetation, dusty soil and slightly desaturated
+      colors, while strictly preserving the exact spatial layout, road boundaries, vegetation
+      regions, building footprints and all object silhouettes.
+    negative_prompt: >
+      lush green vegetation, wet reflective ground, snow, destruction, changed road geometry,
+      added or removed objects, cartoon, CGI, game graphics, low detail, flat shading,
+      oversmoothed, synthetic render, unrealistic colors
+
+  # --------------------------------------------------------------------------
+  # 13) HAZY DUST
+  # Variante atmosférica seca distinta de dry_climate.
+  # --------------------------------------------------------------------------
+  - name: "hazy_dust"
+    output_dir: "dataset_hazy_dust"
+    fraction: 0.1
+    seed_base: 1300
+    prompt: >
+      Photorealistic top-down drone view of this exact scene under light dusty haze, with
+      slightly reduced clarity, soft atmospheric desaturation, dusty air and a dry realistic
+      atmosphere, while strictly preserving the exact spatial layout, road boundaries,
+      vegetation regions, building footprints and all object silhouettes.
+    negative_prompt: >
+      dense fog, rain, snow, deep night, destruction, changed geometry, added or removed
+      objects, cartoon, CGI, game graphics, low detail, flat shading, oversmoothed,
+      synthetic render, unrealistic colors
