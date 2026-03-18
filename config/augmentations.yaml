@@ -1,39 +1,39 @@
 cosmos:
   repo_root: "/home/airbots-workstation/rcasal/cosmos_utilities/cosmos-transfer2.5"
-
   model_variant: "edge"
   model_distilled: false
-  
-  use_edge_control: true
-  edge_control_weight: 1.0
-  seg_control_weight: 1.0
   disable_guardrails: true
-
   resolution: "720"
-  guidance: 4
+  guidance: 4.0
   num_steps: 36
   max_frames: 1
   num_video_frames_per_chunk: 1
 
+  controls:
+    seg:
+      mode: external
+      weight: 1.0
+      subdir: "labels"
+    depth:
+      mode: on_the_fly
+      weight: 0.9
+      subdir: "depth"
+    edge:
+      mode: disabled
+      weight: 1.0
+      subdir: "edges"
+
 dataset:
-  root: "/home/airbots-workstation/Documents/isaac-sim-standalone-5.1.0-linux-x86_64/rozas_basler_stealth/output/2026_03_17_16_10_19/pinhole_dl_data_output/1"
+  input_root: "/home/airbots-workstation/Documents/isaac-sim-standalone-5.1.0-linux-x86_64/rozas_basler_stealth/output/2026_03_17_16_10_19/pinhole_dl_data_output/1"
+  output_root: "/home/airbots-workstation/Documents/isaac-sim-standalone-5.1.0-linux-x86_64/rozas_basler_stealth/output/2026_03_17_16_10_19/pinhole_dl_data_output/1/augmented_outputs"
   original_dir: "."
   image_subdir: "images"
-  label_subdir: "labels"
   image_ext: ".png"
-  segmentation:
-    # "rgb" para máscaras colorizadas (colorize=true)
-    # "id" para máscaras por clase-id (colorize=false)
-    encoding: "rgb"
-    # Si encoding="id", genera una copia RGB temporal para que Cosmos la interprete bien.
-    convert_ids_to_rgb_for_cosmos: true
-    # Carpeta cache dentro de dataset.root para máscaras convertidas.
-    converted_cache_dir: ".cosmos_seg_rgb_cache"
 
 augmentations:
   - name: "sunset"
     output_dir: "dataset_sunset"
-    fraction: 1
+    fraction: 1.0
     seed_base: 400
     prompt: >
       Photorealistic of this scene at sunset, with warm orange and

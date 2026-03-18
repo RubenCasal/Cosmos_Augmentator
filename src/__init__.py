@@ -10,6 +10,5 @@ __all__ = [
     "logging_utils",
     "merger",
     "metrics",
-    "segmentation_adapter",
     "types",
 ]

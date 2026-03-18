@@ -11,8 +11,7 @@ from .augmentation_profile import AugmentationProfile
 from .cosmos_runner import CosmosRunner
 from .dataset_scanner import scan_dataset
 from .metrics import AugmentationTiming, RunTiming, format_seconds
-from .segmentation_adapter import SegmentationAdapter
-from .types import GlobalConfig
+from .types import CONTROL_NAMES, AugmentationJob, GlobalConfig, ImageSample
 
 logger = logging.getLogger(__name__)
 
@@ -20,121 +19,160 @@ logger = logging.getLogger(__name__)
 class DatasetAugmentor:
     def __init__(self, config: GlobalConfig) -> None:
         self.config = config
-        self.samples = scan_dataset(
-            root=config.dataset.root,
-            original_dir=config.dataset.original_dir,
-            image_subdir=config.dataset.image_subdir,
-            label_subdir=config.dataset.label_subdir,
-            image_ext=config.dataset.image_ext,
-        )
+        self.samples = scan_dataset(dataset=config.dataset, controls=config.cosmos.controls)
         self.cosmos_runner = CosmosRunner(config.cosmos)
-        self.segmentation_adapter = SegmentationAdapter(config.dataset)
+
+        controls = config.cosmos.controls.as_dict()
         logger.info(
-            "Segmentation mode: encoding=%s convert_ids_to_rgb_for_cosmos=%s cache_dir=%s",
-            config.dataset.segmentation.encoding,
-            config.dataset.segmentation.convert_ids_to_rgb_for_cosmos,
-            config.dataset.segmentation.converted_cache_dir,
+            "Controls: seg=%s depth=%s edge=%s",
+            controls["seg"].mode,
+            controls["depth"].mode,
+            controls["edge"].mode,
         )
 
-    def _prepare_output_dirs_for_profile(self, dataset_root: Path, output_dir_name: str) -> tuple[Path, Path, Path]:
-        aug_root = dataset_root / output_dir_name
+    def _build_jobs_for_profile(self, profile: AugmentationProfile) -> list[AugmentationJob]:
+        selected_samples: list[ImageSample] = profile.select_samples(self.samples)
+        jobs: list[AugmentationJob] = []
+
+        for idx, sample in enumerate(selected_samples, start=1):
+            request_name = f"{profile.name}_{Path(sample.name).stem}"
+            jobs.append(
+                AugmentationJob(
+                    augmentation_name=profile.name,
+                    output_dir_name=profile.output_dir_name,
+                    request_name=request_name,
+                    seed=profile.seed_base + idx,
+                    image_name=sample.name,
+                    image_path=sample.image_path,
+                    control_paths=sample.control_paths,
+                    prompt=profile.prompt,
+                    negative_prompt=profile.negative_prompt,
+                )
+            )
+
+        return jobs
+
+    def _prepare_output_dirs_for_profile(
+        self,
+        output_root: Path,
+        output_dir_name: str,
+    ) -> tuple[Path, dict[str, Path], Path]:
+        aug_root = output_root / output_dir_name
         aug_images = aug_root / self.config.dataset.image_subdir
-        aug_labels = aug_root / self.config.dataset.label_subdir
         temp_output = aug_root / "_cosmos_output"
 
         if temp_output.exists():
             shutil.rmtree(temp_output)
 
         aug_images.mkdir(parents=True, exist_ok=True)
-        aug_labels.mkdir(parents=True, exist_ok=True)
         temp_output.mkdir(parents=True, exist_ok=True)
-        return aug_images, aug_labels, temp_output
+
+        control_dirs: dict[str, Path] = {}
+        for control_name in CONTROL_NAMES:
+            control_cfg = self.config.cosmos.controls.as_dict()[control_name]
+            if not control_cfg.is_external:
+                continue
+            dst_dir = aug_root / control_cfg.subdir
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            control_dirs[control_name] = dst_dir
+
+        return aug_images, control_dirs, temp_output
 
     @staticmethod
-    def _save_generated_as_dataset_image(generated_path: Path, expected_img_path: Path) -> None:
+    def _copy_file(src: Path, dst: Path) -> None:
+        if dst.exists():
+            dst.unlink()
+        shutil.copy2(src, dst)
+
+    def _materialize_job(
+        self,
+        job: AugmentationJob,
+        generated_path: Path,
+        aug_images: Path,
+        control_dirs: dict[str, Path],
+    ) -> None:
         if not generated_path.exists():
             raise RuntimeError(f"Generated image not found: {generated_path}")
-        if expected_img_path.exists():
-            expected_img_path.unlink()
-        shutil.copy2(generated_path, expected_img_path)
+
+        image_dst = aug_images / job.image_name
+        self._copy_file(generated_path, image_dst)
+
+        for control_name, dst_dir in control_dirs.items():
+            src_control = job.control_paths.get(control_name)
+            if src_control is None:
+                continue
+            self._copy_file(src_control, dst_dir / job.image_name)
 
     def run_augmentations(self) -> None:
-        dataset_root = Path(self.config.dataset.root)
-        run_timing = RunTiming()
+        output_root = Path(self.config.dataset.output_root)
+        output_root.mkdir(parents=True, exist_ok=True)
 
-        logger.info("Found %d source samples in original dataset.", len(self.samples))
+        run_timing = RunTiming()
+        logger.info("Found %d source samples in input dataset.", len(self.samples))
 
         run_start = time.perf_counter()
         for aug_cfg in self.config.augmentations:
             profile = AugmentationProfile.from_config(aug_cfg)
-            selected_samples = profile.select_samples(self.samples)
+            jobs = self._build_jobs_for_profile(profile)
 
             logger.info(
                 "Augmentation '%s': selected %d/%d samples (fraction=%.3f).",
                 profile.name,
-                len(selected_samples),
+                len(jobs),
                 len(self.samples),
                 profile.fraction,
             )
 
-            if not selected_samples:
+            if not jobs:
                 run_timing.add(AugmentationTiming(name=profile.name))
                 continue
 
-            aug_images, aug_labels, temp_output = self._prepare_output_dirs_for_profile(
-                dataset_root=dataset_root,
+            aug_images, control_dirs, temp_output = self._prepare_output_dirs_for_profile(
+                output_root=output_root,
                 output_dir_name=profile.output_dir_name,
             )
 
             aug_timing = AugmentationTiming(name=profile.name)
             try:
-                for idx, sample in enumerate(
-                    tqdm(selected_samples, desc=f"Generating {profile.name}", unit="image"),
-                    start=1,
-                ):
-                    seed = profile.seed_base + idx
-                    request_name = f"{profile.name}_{sample.image_path.stem}"
-
+                for idx, job in enumerate(tqdm(jobs, desc=f"Generating {profile.name}", unit="image"), start=1):
                     image_start = time.perf_counter()
                     try:
                         generated_path = self.cosmos_runner.run_single(
-                            image_path=sample.image_path,
-                            seg_path=self.segmentation_adapter.prepare_for_cosmos(sample.label_path),
-                            prompt=profile.prompt,
-                            negative_prompt=profile.negative_prompt,
+                            image_path=job.image_path,
+                            prompt=job.prompt,
+                            negative_prompt=job.negative_prompt,
                             output_dir=temp_output,
-                            seed=seed,
-                            name=request_name,
+                            seed=job.seed,
+                            name=job.request_name,
+                            control_paths=job.control_paths,
+                        )
+                        self._materialize_job(
+                            job=job,
+                            generated_path=generated_path,
+                            aug_images=aug_images,
+                            control_dirs=control_dirs,
                         )
 
-                        expected_img_path = aug_images / sample.image_path.name
-                        self._save_generated_as_dataset_image(generated_path, expected_img_path)
-
-                        label_dst = aug_labels / sample.label_path.name
-                        if label_dst.exists():
-                            label_dst.unlink()
-                        shutil.copy2(sample.label_path, label_dst)
-
                         elapsed = time.perf_counter() - image_start
-                        aug_timing.record_success(sample.name, elapsed)
+                        aug_timing.record_success(job.image_name, elapsed)
                         logger.info(
                             "[img %d/%d][%s] %.2fs | %s",
                             idx,
-                            len(selected_samples),
+                            len(jobs),
                             profile.name,
                             elapsed,
-                            sample.name,
+                            job.image_name,
                         )
                     except Exception as exc:
                         elapsed = time.perf_counter() - image_start
-                        aug_timing.record_failure(sample.name, elapsed, exc)
+                        aug_timing.record_failure(job.image_name, elapsed, exc)
                         logger.exception(
                             "[img %d/%d][%s] FAILED in %.2fs | %s",
                             idx,
-                            len(selected_samples),
+                            len(jobs),
                             profile.name,
                             elapsed,
-                            sample.name,
+                            job.image_name,
                         )
             finally:
                 shutil.rmtree(temp_output, ignore_errors=True)

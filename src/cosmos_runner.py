@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .types import CosmosConfig
+from .types import CONTROL_NAMES, ControlName, CosmosConfig
 
 logger = logging.getLogger(__name__)
 
@@ -25,18 +25,17 @@ def add_cosmos_to_sys_path(repo_root: Path) -> None:
 
 
 def _safe_instantiate(cls: type, payload: dict[str, Any]) -> Any:
-    sig = inspect.signature(cls)
+    signature = inspect.signature(cls)
     supported: dict[str, Any] = {}
     for key, value in payload.items():
-        if key in sig.parameters:
+        if key in signature.parameters:
             supported[key] = value
     return cls(**supported)
 
 
 class CosmosRunner:
-    def __init__(self, config: CosmosConfig, batch_hint_keys: list[str] | None = None) -> None:
+    def __init__(self, config: CosmosConfig) -> None:
         self.config = config
-        self.batch_hint_keys = batch_hint_keys or self._default_batch_hint_keys()
         self.inference: Any | None = None
         self._import_error: Exception | None = None
 
@@ -70,26 +69,6 @@ class CosmosRunner:
                 config.repo_root,
                 exc,
             )
-
-    def _default_batch_hint_keys(self) -> list[str]:
-        hint_keys = ["seg"]
-        if self.config.use_edge_control:
-            hint_keys.append("edge")
-        return hint_keys
-
-    def _build_control_payload(self, seg_path: Path) -> dict[str, Any]:
-        payload = {
-            "seg": {
-                "control_path": str(seg_path),
-                "control_weight": self.config.seg_control_weight,
-            }
-        }
-        if self.config.use_edge_control:
-            payload["edge"] = {
-                "control_path": str(seg_path),
-                "control_weight": self.config.edge_control_weight,
-            }
-        return payload
 
     def _build_setup_args(self) -> Any:
         if self._SetupArguments is None:
@@ -130,18 +109,47 @@ class CosmosRunner:
 
         raise CosmosRunnerError(
             "Unable to instantiate SetupArguments with available constructor variants. "
-            f"Last error: {last_error}. Try setting cosmos.model in config/augmentations.yaml "
-            "to the exact model string used by your local Cosmos setup."
+            f"Last error: {last_error}. Try setting cosmos.model in config to the exact "
+            "model string used by your local Cosmos setup."
         )
+
+    def _build_control_payload(self, control_paths: dict[ControlName, Path | None]) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        controls = self.config.controls.as_dict()
+
+        for control_name in CONTROL_NAMES:
+            control_cfg = controls[control_name]
+            if control_cfg.is_disabled:
+                continue
+
+            control_payload: dict[str, Any] = {
+                "control_weight": control_cfg.weight,
+            }
+
+            if control_cfg.is_external:
+                control_path = control_paths.get(control_name)
+                if control_path is None:
+                    raise CosmosRunnerError(
+                        f"Control '{control_name}' is external but no path was provided for this sample."
+                    )
+                if not control_path.exists():
+                    raise CosmosRunnerError(
+                        f"External control file for '{control_name}' does not exist: {control_path}"
+                    )
+                control_payload["control_path"] = str(control_path)
+
+            payload[control_name] = control_payload
+
+        return payload
 
     def _build_inference_args(
         self,
         image_path: Path,
-        seg_path: Path,
         prompt: str,
         negative_prompt: str,
         seed: int,
         name: str,
+        control_paths: dict[ControlName, Path | None],
     ) -> Any:
         if self._InferenceArguments is None:
             raise CosmosRunnerError("Cosmos InferenceArguments is not available.")
@@ -158,7 +166,7 @@ class CosmosRunner:
             "max_frames": self.config.max_frames,
             "num_video_frames_per_chunk": self.config.num_video_frames_per_chunk,
         }
-        raw_payload.update(self._build_control_payload(seg_path))
+        raw_payload.update(self._build_control_payload(control_paths))
 
         try:
             return _safe_instantiate(self._InferenceArguments, raw_payload)
@@ -167,24 +175,24 @@ class CosmosRunner:
 
         from_files = getattr(self._InferenceArguments, "from_files", None)
         if callable(from_files):
-            tmp_path: Path | None = None
+            temp_path: Path | None = None
             try:
                 with tempfile.NamedTemporaryFile(
                     mode="w",
                     suffix=".json",
                     delete=False,
                     encoding="utf-8",
-                ) as tmp:
-                    json.dump(raw_payload, tmp, indent=2)
-                    tmp_path = Path(tmp.name)
+                ) as temp_file:
+                    json.dump(raw_payload, temp_file, indent=2)
+                    temp_path = Path(temp_file.name)
 
-                loaded = from_files([str(tmp_path)])
+                loaded = from_files([str(temp_path)])
                 if isinstance(loaded, list) and loaded:
                     return loaded[0]
                 raise CosmosRunnerError("InferenceArguments.from_files returned an empty list.")
             finally:
-                if tmp_path is not None:
-                    tmp_path.unlink(missing_ok=True)
+                if temp_path is not None:
+                    temp_path.unlink(missing_ok=True)
 
         raise CosmosRunnerError("Could not build InferenceArguments via constructor or from_files.")
 
@@ -229,17 +237,15 @@ class CosmosRunner:
     def run_single(
         self,
         image_path: Path,
-        seg_path: Path,
         prompt: str,
         negative_prompt: str,
         output_dir: Path,
         seed: int,
         name: str,
+        control_paths: dict[ControlName, Path | None],
     ) -> Path:
         if not image_path.exists():
             raise CosmosRunnerError(f"Image does not exist: {image_path}")
-        if not seg_path.exists():
-            raise CosmosRunnerError(f"Segmentation label does not exist: {seg_path}")
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -247,13 +253,12 @@ class CosmosRunner:
             try:
                 inference_args = self._build_inference_args(
                     image_path=image_path,
-                    seg_path=seg_path,
                     prompt=prompt,
                     negative_prompt=negative_prompt,
                     seed=seed,
                     name=name,
+                    control_paths=control_paths,
                 )
-
                 generator = getattr(self.inference, "generate", None)
                 if callable(generator):
                     raw_out = generator(inference_args, output_path=str(output_dir))
@@ -267,23 +272,23 @@ class CosmosRunner:
 
         return self._fallback_generate(
             image_path=image_path,
-            seg_path=seg_path,
             prompt=prompt,
             negative_prompt=negative_prompt,
             output_dir=output_dir,
             seed=seed,
             name=name,
+            control_paths=control_paths,
         )
 
     def _fallback_generate(
         self,
         image_path: Path,
-        seg_path: Path,
         prompt: str,
         negative_prompt: str,
         output_dir: Path,
         seed: int,
         name: str,
+        control_paths: dict[ControlName, Path | None],
     ) -> Path:
         payload: dict[str, Any] = {
             "name": name,
@@ -297,24 +302,24 @@ class CosmosRunner:
             "max_frames": self.config.max_frames,
             "num_video_frames_per_chunk": self.config.num_video_frames_per_chunk,
         }
-        payload.update(self._build_control_payload(seg_path))
+        payload.update(self._build_control_payload(control_paths))
 
-        tmp_path: Path | None = None
+        temp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
                 mode="w",
                 suffix=".json",
                 delete=False,
                 encoding="utf-8",
-            ) as tmp:
-                json.dump(payload, tmp, indent=2)
-                tmp_path = Path(tmp.name)
+            ) as temp_file:
+                json.dump(payload, temp_file, indent=2)
+                temp_path = Path(temp_file.name)
 
             cmd = [
                 sys.executable,
                 "examples/inference.py",
                 "-i",
-                str(tmp_path),
+                str(temp_path),
                 "-o",
                 str(output_dir),
             ]
@@ -347,5 +352,5 @@ class CosmosRunner:
 
             return candidates[-1].resolve()
         finally:
-            if tmp_path is not None:
-                tmp_path.unlink(missing_ok=True)
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)

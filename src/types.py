@@ -2,13 +2,44 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
+
+ControlName = Literal["seg", "depth", "edge"]
+ControlMode = Literal["disabled", "external", "on_the_fly"]
+CONTROL_NAMES: tuple[ControlName, ...] = ("seg", "depth", "edge")
 
 
 @dataclass(frozen=True)
-class ImageSample:
-    name: str
-    image_path: Path
-    label_path: Path
+class ControlConfig:
+    mode: ControlMode
+    weight: float
+    subdir: str
+
+    @property
+    def is_disabled(self) -> bool:
+        return self.mode == "disabled"
+
+    @property
+    def is_external(self) -> bool:
+        return self.mode == "external"
+
+    @property
+    def is_on_the_fly(self) -> bool:
+        return self.mode == "on_the_fly"
+
+
+@dataclass(frozen=True)
+class CosmosControls:
+    seg: ControlConfig
+    depth: ControlConfig
+    edge: ControlConfig
+
+    def as_dict(self) -> dict[ControlName, ControlConfig]:
+        return {
+            "seg": self.seg,
+            "depth": self.depth,
+            "edge": self.edge,
+        }
 
 
 @dataclass(frozen=True)
@@ -23,25 +54,16 @@ class CosmosConfig:
     model: str | None
     model_variant: str
     model_distilled: bool
-    use_edge_control: bool
-    edge_control_weight: float
-    seg_control_weight: float
+    controls: CosmosControls
 
 
 @dataclass(frozen=True)
 class DatasetConfig:
-    @dataclass(frozen=True)
-    class SegmentationConfig:
-        encoding: str = "rgb"
-        convert_ids_to_rgb_for_cosmos: bool = True
-        converted_cache_dir: str = ".cosmos_seg_rgb_cache"
-
-    root: Path
+    input_root: Path
+    output_root: Path
     original_dir: str
     image_subdir: str
-    label_subdir: str
     image_ext: str
-    segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
 
 
 @dataclass(frozen=True)
@@ -58,6 +80,26 @@ class AugmentationConfig:
 class LoggingConfig:
     level: str = "INFO"
     file_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class ImageSample:
+    name: str
+    image_path: Path
+    control_paths: dict[ControlName, Path | None]
+
+
+@dataclass(frozen=True)
+class AugmentationJob:
+    augmentation_name: str
+    output_dir_name: str
+    request_name: str
+    seed: int
+    image_name: str
+    image_path: Path
+    control_paths: dict[ControlName, Path | None]
+    prompt: str
+    negative_prompt: str
 
 
 @dataclass(frozen=True)
