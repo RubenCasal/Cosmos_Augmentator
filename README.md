@@ -46,7 +46,9 @@ The following example uses `orig1.png` and its generated variants stored in `doc
 
 ### Original image
 
-<img src="documentation_media/orig1.png" width="80%">
+<p align="center">
+  <img src="documentation_media/orig1.png" width="80%">
+</p>
 
 **Snow augmentation**
 
@@ -54,7 +56,9 @@ The following example uses `orig1.png` and its generated variants stored in `doc
 
 > A photorealistic low-altitude top-down view of an outdoor area, seen from a camera looking straight down while moving smoothly forward. A lightly snow-covered environment with a natural winter atmosphere.
 
-<img src="documentation_media/snow1.png" width="80%">
+<p align="center">
+  <img src="documentation_media/snow1.png" width="80%">
+</p>
 
 **Sunset augmentation**
 
@@ -62,7 +66,9 @@ The following example uses `orig1.png` and its generated variants stored in `doc
 
 > A photorealistic low-altitude top-down view of an outdoor area, seen from a camera looking straight down while moving smoothly forward. Warm late-afternoon warm light, softer shadows, and a natural sunset atmosphere across the scene.
 
-<img src="documentation_media/sunset1.png" width="80%">
+<p align="center">
+  <img src="documentation_media/sunset1.png" width="80%">
+</p>
 
 **Dry augmentation**
 
@@ -70,7 +76,9 @@ The following example uses `orig1.png` and its generated variants stored in `doc
 
 > A photorealistic low-altitude top-down view of an outdoor area, seen from a camera looking straight down while moving smoothly forward. A very dry environment with a dry-season appearance, sun-exposed ground, and a naturally dry atmosphere.
 
-<img src="documentation_media/dry1.png" width="80%">
+<p align="center">
+  <img src="documentation_media/dry1.png" width="80%">
+</p>
 
 **Warm augmentation**
 
@@ -78,7 +86,9 @@ The following example uses `orig1.png` and its generated variants stored in `doc
 
 > A photorealistic low-altitude top-down view of an outdoor area, seen from a camera looking straight down while moving smoothly forward. A war-affected environment with burned and blackened areas on the ground and a harsh conflict-zone atmosphere.
 
-<img src="documentation_media/war1.png" width="80%">
+<p align="center">
+  <img src="documentation_media/war1.png" width="80%">
+</p>
 
 ## Output Structure
 
