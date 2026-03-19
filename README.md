@@ -1,6 +1,6 @@
 # COSMOS DATA AUGMENTATOR
 
-<img src="documentation_media/augmentation_demo.gif" alt="Demo" width="800">
+<img src="documentation_media/augmentation_demo.gif" alt="Demo" width="80%">
 
 `cosmos_augmentor` is a data augmentation tool for semantic segmentation datasets generated with Isaac Sim. It uses NVIDIA Cosmos-Transfer2.5 to create new photorealistic variants of synthetic scenes while preserving the original semantic labels required for training segmentation models.
 
