@@ -24,6 +24,17 @@ def _id_to_rgb(class_id: int) -> tuple[int, int, int]:
     return red, green, blue
 
 
+def _normalize_to_uint8(values: list[float]) -> list[int]:
+    if not values:
+        return []
+    min_val = min(values)
+    max_val = max(values)
+    if max_val == min_val:
+        return [0 for _ in values]
+    scale = 255.0 / (max_val - min_val)
+    return [max(0, min(255, int(round((v - min_val) * scale)))) for v in values]
+
+
 class ControlImageAdapter:
     def __init__(self, config: GlobalConfig) -> None:
         self.config = config
@@ -100,8 +111,15 @@ class ControlImageAdapter:
                 return source
 
             # Cosmos expects an image-like control input. If the dataset provides a single-channel
-            # depth/edge map (common), we make it RGB by repeating channels.
-            gray = image.convert("L")
+            # depth/edge map (common), we normalize it to 8-bit and repeat channels.
+            if image.mode in {"I;16", "I", "F"}:
+                values = [float(v) for v in image.getdata()]
+                normalized = _normalize_to_uint8(values)
+                gray = Image.new("L", image.size)
+                gray.putdata(normalized)
+            else:
+                gray = image.convert("L")
+
             rgb = Image.merge("RGB", (gray, gray, gray))
             rgb.save(target)
 
