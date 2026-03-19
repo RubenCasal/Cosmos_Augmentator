@@ -35,6 +35,15 @@ def _normalize_to_uint8(values: list[float]) -> list[int]:
     return [max(0, min(255, int(round((v - min_val) * scale)))) for v in values]
 
 
+def _to_gray_from_numeric(values: list[float], size: tuple[int, int], invert: bool = False) -> Image.Image:
+    normalized = _normalize_to_uint8(values)
+    if invert:
+        normalized = [255 - value for value in normalized]
+    gray = Image.new("L", size)
+    gray.putdata(normalized)
+    return gray
+
+
 class ControlImageAdapter:
     def __init__(self, config: GlobalConfig) -> None:
         self.config = config
@@ -96,7 +105,11 @@ class ControlImageAdapter:
 
     def _convert_mono_to_rgb_if_needed(self, control_name: ControlName, source_path: Path) -> Path:
         source = source_path.resolve()
-        target_dir = (self.cache_root / f"{control_name}_rgb").resolve()
+        cache_subdir = f"{control_name}_rgb"
+        if control_name == "depth":
+            # New cache namespace to avoid reusing stale depth conversions from previous logic.
+            cache_subdir = "depth_rgb_v2"
+        target_dir = (self.cache_root / cache_subdir).resolve()
         target_dir.mkdir(parents=True, exist_ok=True)
         target = (target_dir / source.name).resolve()
 
@@ -107,18 +120,35 @@ class ControlImageAdapter:
             pass
 
         with Image.open(source) as image:
-            if image.mode == "RGB":
-                return source
-
-            # Cosmos expects an image-like control input. If the dataset provides a single-channel
-            # depth/edge map (common), we normalize it to 8-bit and repeat channels.
-            if image.mode in {"I;16", "I", "F"}:
-                values = [float(v) for v in image.getdata()]
-                normalized = _normalize_to_uint8(values)
-                gray = Image.new("L", image.size)
-                gray.putdata(normalized)
+            # For depth, always convert to normalized/inverted gray so it matches Cosmos convention:
+            # white=near, black=far.
+            if control_name == "depth":
+                if image.mode in {"I;16", "I", "F"}:
+                    gray = _to_gray_from_numeric(
+                        values=[float(value) for value in image.getdata()],
+                        size=image.size,
+                        invert=True,
+                    )
+                else:
+                    source_gray = image.convert("L")
+                    gray = _to_gray_from_numeric(
+                        values=[float(value) for value in source_gray.getdata()],
+                        size=image.size,
+                        invert=True,
+                    )
             else:
-                gray = image.convert("L")
+                if image.mode == "RGB":
+                    return source
+
+                # Edge maps can also come in high precision. Normalize them to 8-bit for Cosmos.
+                if image.mode in {"I;16", "I", "F"}:
+                    gray = _to_gray_from_numeric(
+                        values=[float(value) for value in image.getdata()],
+                        size=image.size,
+                        invert=False,
+                    )
+                else:
+                    gray = image.convert("L")
 
             rgb = Image.merge("RGB", (gray, gray, gray))
             rgb.save(target)

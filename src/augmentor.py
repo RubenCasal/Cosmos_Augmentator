@@ -280,7 +280,7 @@ class DatasetAugmentor:
         logger.info("Found %d source samples in input dataset.", len(self.samples))
 
         run_start = time.perf_counter()
-        for aug_cfg in self.config.augmentations:
+        for aug_cfg in tqdm(self.config.augmentations, desc="Augmentations", unit="aug"):
             profile = AugmentationProfile.from_config(aug_cfg)
             jobs = self._build_jobs_for_profile(profile)
 
