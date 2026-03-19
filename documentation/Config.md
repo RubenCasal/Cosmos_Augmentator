@@ -1,321 +1,58 @@
 # Configuration Reference
 
-This repository is configured through a YAML file, typically `config/augmentations.yaml`. The configuration is split into four main sections:
+This repository is configured through a YAML file, typically `config/augmentations.yaml`. The reference below is intentionally compact and focuses on the parameters used by this project.
 
-- `cosmos`
-- `dataset`
-- `augmentations`
-- `logging`
+## Cosmos
 
-## `cosmos`
+- `repo_root`: Absolute path to the local `cosmos-transfer2.5` repository.
+- `model`: Optional model name passed to Cosmos. In many setups this can be omitted.
+- `model_variant`: Cosmos model variant, commonly `"edge"`.
+- `model_distilled`: Enables distilled mode. Allowed values: `true`, `false`.
+- `disable_guardrails`: Disables Cosmos guardrails. Allowed values: `true`, `false`.
+- `resolution`: Target Cosmos resolution, typically a string such as `"720"`.
+- `guidance`: Guidance scale. This repository validates it as numeric.
+- `num_steps`: Number of inference steps. This repository validates it as an integer.
+- `max_frames`: Maximum number of frames. For this tool it should normally be `1`.
+- `num_video_frames_per_chunk`: Cosmos chunk size. For this tool it should normally be `1`.
 
-### `repo_root`
+## Control Parameters
 
-Absolute path to the local `cosmos-transfer2.5` repository.
+These parameters apply to each control block under `cosmos.controls.seg`, `cosmos.controls.depth`, and `cosmos.controls.edge`.
 
-Example:
+- `mode`: How the control is used. Allowed values: `disabled`, `external`, `on_the_fly`.
+- `weight`: Control strength. Validated range: `0.0` to `1.0`.
+- `subdir`: Dataset subdirectory used when the control mode is `external`.
+- `encoding`: Only relevant for `seg`. Allowed values: `rgb`, `id`.
 
-```yaml
-repo_root: "/path/to/cosmos-transfer2.5"
-```
+Control defaults are usually:
 
-### `model`
+- `seg.subdir`: `labels`
+- `depth.subdir`: `depth`
+- `edge.subdir`: `edges`
 
-Optional model name passed to Cosmos. Leave unset if your local Cosmos setup already resolves the desired model through its defaults.
-
-### `model_variant`
-
-Model variant used by Cosmos.
-
-Typical values:
-
-```yaml
-model_variant: "edge"
-```
-
-### `model_distilled`
-
-Boolean flag that enables the distilled model variant when available.
-
-Allowed values:
-
-- `true`
-- `false`
-
-### `disable_guardrails`
-
-Boolean flag to disable Cosmos guardrails.
-
-Allowed values:
-
-- `true`
-- `false`
-
-### `resolution`
-
-Target resolution string passed to Cosmos.
-
-Example:
-
-```yaml
-resolution: "720"
-```
-
-### `guidance`
-
-Guidance scale passed to Cosmos.
-
-Validation in this repository:
-
-- Numeric value
-
-Practical usage:
-
-- Commonly tuned around `2.0` to `6.0`
-
-### `num_steps`
-
-Number of denoising or inference steps.
-
-Validation in this repository:
-
-- Integer value
-
-Practical usage:
-
-- Often tuned in the `20` to `40` range depending on the dataset and desired fidelity
-
-### `max_frames`
-
-Maximum number of frames used by Cosmos.
-
-Validation in this repository:
-
-- Integer value
-
-Recommended for this project:
-
-- `1`, because this repository is currently focused on image augmentation workflows
-
-### `num_video_frames_per_chunk`
-
-Chunk size passed to Cosmos for generation.
-
-Validation in this repository:
-
-- Integer value
-
-Recommended for this project:
-
-- `1`, for image-only workflows
-
-## `cosmos.controls`
-
-The repository supports three control modalities:
-
-- `seg`
-- `depth`
-- `edge`
-
-Each control block supports the same structure.
-
-### `mode`
-
-Defines how the control is provided.
-
-Allowed values:
-
-- `disabled`
-- `external`
-- `on_the_fly`
-
-Behavior:
+Behavior summary:
 
 - `disabled`: the control is not sent to Cosmos
-- `external`: the control is read from the dataset folders
+- `external`: the control is loaded from the dataset folder
 - `on_the_fly`: Cosmos generates the control internally
 
-### `weight`
-
-Control strength.
-
-Validated range:
-
-- `0.0` to `1.0`
-
-Important note:
-
-- If multiple control weights sum to more than `1.0`, Cosmos may normalize them internally
-
-### `subdir`
-
-Folder name used when the control mode is `external`.
-
-Typical defaults:
-
-- `seg`: `labels`
-- `depth`: `depth`
-- `edge`: `edges`
-
-### `encoding`
-
-Currently relevant for `seg`.
-
-Allowed values for `seg`:
-
-- `rgb`
-- `id`
-
-Meaning:
-
-- `rgb`: semantic segmentation masks are colorized
-- `id`: semantic segmentation masks store class ids directly
-
-For depth and edge controls, the repository internally adapts the input to a Cosmos-compatible RGB representation when needed.
-
-## `dataset`
-
-### `input_root`
-
-Absolute path to the source dataset root.
-
-### `output_root`
-
-Absolute path where augmentation outputs and the merged dataset are written.
-
-This does not need to be the same as `input_root`.
-
-### `original_dir`
-
-Relative subdirectory inside `input_root` containing the original dataset.
-
-Typical value:
-
-```yaml
-original_dir: "."
-```
-
-### `image_subdir`
-
-Folder containing the original RGB images.
-
-Typical value:
-
-```yaml
-image_subdir: "images"
-```
-
-### `label_subdir`
-
-Folder containing the ground-truth semantic segmentation labels.
-
-Typical value:
-
-```yaml
-label_subdir: "labels"
-```
-
-### `image_ext`
-
-Image extension used to match dataset files.
-
-Typical value:
-
-```yaml
-image_ext: ".png"
-```
-
-### `cache_dir`
-
-Folder inside `output_root` used for internally adapted control inputs, such as depth converted to Cosmos-compatible RGB.
-
-Typical value:
-
-```yaml
-cache_dir: ".cosmos_control_cache"
-```
-
-## `augmentations`
-
-This section is a list. Each entry defines one augmentation profile.
-
-### `name`
-
-Logical name of the augmentation.
-
-Example:
-
-```yaml
-name: "snow"
-```
-
-### `output_dir`
-
-Name of the directory created under `output_root` for this augmentation.
-
-### `fraction`
-
-Fraction of the input dataset to sample for this augmentation.
-
-Validated range:
-
-- `0.0` to `1.0`
-
-Examples:
-
-- `1.0`: use the full dataset
-- `0.25`: use 25 percent of the dataset
-
-### `seed_base`
-
-Base integer seed used to derive deterministic seeds for each selected image.
-
-Validation in this repository:
-
-- Integer value
-
-### `prompt`
-
-Positive prompt used to drive the augmentation.
-
-Validation in this repository:
-
-- Non-empty string
-
-### `negative_prompt`
-
-Negative prompt used to restrict unwanted styles or artifacts.
-
-Validation in this repository:
-
-- Non-empty string
-
-## `logging`
-
-This section is optional.
-
-### `level`
-
-Logging level for the CLI.
-
-Typical values:
-
-- `DEBUG`
-- `INFO`
-- `WARNING`
-- `ERROR`
-
-### `file`
-
-Optional path to a log file.
-
-Example:
-
-```yaml
-logging:
-  level: "INFO"
-  file: "logs/run.log"
-```
+The repository automatically adapts depth and edge inputs to a Cosmos-compatible RGB format when required.
+
+## Dataset
+
+- `input_root`: Absolute path to the source dataset.
+- `output_root`: Absolute path where augmentation outputs and the merged dataset are written.
+- `original_dir`: Relative path inside `input_root` containing the original dataset. Common value: `"."`.
+- `image_subdir`: Folder containing RGB images. Common value: `"images"`.
+- `label_subdir`: Folder containing semantic labels. Common value: `"labels"`.
+- `image_ext`: File extension used to match dataset files. Common value: `".png"`.
+- `cache_dir`: Internal cache folder for adapted controls. Common value: `".cosmos_control_cache"`.
+- `augmentations[].name`: Name of the augmentation profile.
+- `augmentations[].output_dir`: Output directory created for that augmentation.
+- `augmentations[].fraction`: Fraction of the dataset to sample. Validated range: `0.0` to `1.0`.
+- `augmentations[].seed_base`: Base integer seed used to generate deterministic per-image seeds.
+- `augmentations[].prompt`: Positive prompt. Must be a non-empty string.
+- `augmentations[].negative_prompt`: Negative prompt. Must be a non-empty string.
 
 ## Minimal Example
 

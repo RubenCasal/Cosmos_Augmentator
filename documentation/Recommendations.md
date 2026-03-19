@@ -14,6 +14,12 @@ Cosmos documentation often recommends using `0.9` for segmentation and depth whi
 
 In particular, increasing the contribution of `edge` helped reduce hallucinations and improved the preservation of semantic boundaries.
 
+## Start Small
+
+When designing prompts and tuning control weights, it is strongly recommended to start with a small subset of the dataset, for example `10` images. This makes it much faster to see which configuration works well for a specific environment before launching a large run.
+
+It is also better not to mix very different environments during prompt design. In practice, prompt tuning is usually more reliable when each environment has its own dedicated prompt and configuration.
+
 ## Number of Steps
 
 `num_steps` usually requires fine tuning for the specific dataset.
@@ -89,3 +95,9 @@ Potential issues:
 - Very flat materials or unrealistic simulator colors can reduce realism and hurt generation quality
 
 In practice, the better the original scene is visually interpretable, the more consistent Cosmos tends to be when generating realistic variations while keeping the semantic structure intact.
+
+## Curate the Dataset Manually
+
+A manual cleanup pass is highly recommended before using the dataset at scale. Even with good controls and prompts, Cosmos can still produce hallucinations or inconsistent outputs on difficult samples.
+
+Removing problematic source images and reviewing generated results manually usually improves the final dataset quality more than trying to solve every issue through prompt engineering alone.

@@ -40,13 +40,11 @@ python -m cosmos_augmentor.cli --config config/augmentations.yaml merge
 
 ## Examples
 
-All example media can be placed inside `documentation_media/`. The markdown below is ready to use and only needs the final filenames.
+The following example uses `orig1.png` and its generated variants stored in `documentation_media/`.
 
-### Example 1
+### Original image
 
-**Original image**
-
-![Original image](documentation_media/original_image_01.png)
+![Original image](documentation_media/orig1.png)
 
 **Snow augmentation**
 
@@ -54,13 +52,7 @@ All example media can be placed inside `documentation_media/`. The markdown belo
 
 > Top-down view of an outdoor robotic scene during snowfall, with cold winter lighting, snow accumulation on the ground and vegetation, realistic atmospheric softness, and preserved scene layout.
 
-![Snow augmentation](documentation_media/snow_augmentation_01.png)
-
-### Example 2
-
-**Original image**
-
-![Original image](documentation_media/original_image_02.png)
+![Snow augmentation](documentation_media/snow1.png)
 
 **Sunset augmentation**
 
@@ -68,21 +60,31 @@ All example media can be placed inside `documentation_media/`. The markdown belo
 
 > Photorealistic top-down view of the same scene at sunset, with warm orange light, long shadows, darker terrain tones, and realistic atmospheric haze while preserving the original spatial structure.
 
-![Sunset augmentation](documentation_media/sunset_augmentation_02.png)
+![Sunset augmentation](documentation_media/sunset1.png)
 
-### Example 3
-
-**Original image**
-
-![Original image](documentation_media/original_image_03.png)
-
-**Overcast augmentation**
+**Rain augmentation**
 
 **Prompt example**
 
-> Photorealistic aerial view of the same scene under an overcast sky, with soft diffuse lighting, muted contrast, damp ground appearance, and preserved object boundaries and layout.
+> Photorealistic top-down view of the same scene during rainfall, with wet surfaces, soft atmospheric haze, darker terrain tones, and preserved layout and object boundaries.
 
-![Overcast augmentation](documentation_media/overcast_augmentation_03.png)
+![Rain augmentation](documentation_media/rain1.png)
+
+**Dry augmentation**
+
+**Prompt example**
+
+> Photorealistic top-down view of the same scene in dry weather, with clean visibility, balanced daylight, realistic ground texture, and preserved semantic structure.
+
+![Dry augmentation](documentation_media/dry1.png)
+
+**Warm augmentation**
+
+**Prompt example**
+
+> Photorealistic top-down view of the same scene under warm late-afternoon light, with rich earthy tones, soft shadows, and preserved spatial structure.
+
+![Warm augmentation](documentation_media/war1.png)
 
 ## Output Structure
 

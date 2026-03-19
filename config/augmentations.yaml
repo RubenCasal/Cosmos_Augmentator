@@ -1,10 +1,10 @@
 cosmos:
-  repo_root: "/home/airbots-workstation/rcasal/cosmos_utilities/cosmos-transfer2.5"
-  model_variant: "edge"
+  repo_root: "/your/absolute/path/to/cosmos-transfer2.5"
+  model_variant: "seg"
   model_distilled: false
   disable_guardrails: true
   resolution: "720"
-  guidance: 4.0
+  guidance: 2.0
   num_steps: 36
   max_frames: 1
   num_video_frames_per_chunk: 1
@@ -12,25 +12,24 @@ cosmos:
   controls:
     seg:
       mode: external
-      weight: 0.9
+      weight: 0.5
       subdir: "labels"
-      # encoding: "rgb" (colorize=true) or "id" (colorize=false)
       encoding: "rgb"
+
     depth:
-      mode: disabled
-      weight: 0.9
+      mode: external
+      weight: 0.5
       subdir: "depth"
-      # If your depth control is single-channel PNG, the tool converts it to RGB for Cosmos when mode=external.
       encoding: "rgb"
+
     edge:
-      mode: disabled
-      weight: 1.0
+      mode: on_the_fly
+      weight: 0.5
       subdir: "edges"
 
-
 dataset:
-  input_root: "/home/airbots-workstation/Documents/isaac-sim-standalone-5.1.0-linux-x86_64/aldin_basler_stealth/output/2026_03_17_15_44_18/pinhole_dl_data_output/1"
-  output_root: "/home/airbots-workstation/Documents/isaac-sim-standalone-5.1.0-linux-x86_64/aldin_basler_stealth/output/2026_03_17_15_44_18/pinhole_dl_data_output/1/augmented_outputs"
+  input_root: "/your/absolute/path/to/your/input/dataset"
+  output_root: "/your/absolute/path/to/your/output/dataset"
   original_dir: "."
   image_subdir: "images"
   label_subdir: "labels"
@@ -40,13 +39,55 @@ dataset:
 augmentations:
   - name: "sunset"
     output_dir: "dataset_sunset"
-    fraction: 0.1
-    seed_base: 400
+    fraction: 1.0
+    seed_base: 40
     prompt: >
-      Photorealistic of this scene at sunset, with warm orange and
-      golden light, long soft shadows, slightly darker terrain and vegetation, and
-      realistic atmospheric haze towards the horizon, while preserving the relative
-      positions of roads, buildings, ground and vegetation areas.
+      A photorealistic low-altitude top-down view of an outdoor area, seen from a camera
+      looking straight down while moving smoothly forward. Warm late-afternoon warm light,
+      softer shadows, and a natural sunset atmosphere across the scene.
     negative_prompt: >
-      midday lighting, flat lighting, harsh overhead sun, cartoon, CGI, game graphics,
-      low detail, flat shading, oversmoothed, synthetic render, unrealistic colors
+      Cartoon, CGI, Simulation.
+
+  - name: "dry_ground"
+    output_dir: "dataset_dry_ground"
+    fraction: 1.0
+    seed_base: 140
+    prompt: >
+      A photorealistic low-altitude top-down view of an outdoor area, seen from a camera
+      looking straight down while moving smoothly forward. A very dry environment with a
+      dry-season appearance, sun-exposed ground, and a naturally dry atmosphere.
+    negative_prompt: >
+      Cartoon, CGI, Simulation.
+
+  - name: "war_burnt_ground"
+    output_dir: "dataset_war_burnt_ground"
+    fraction: 1.0
+    seed_base: 240
+    prompt: >
+      A photorealistic low-altitude top-down view of an outdoor area, seen from a camera
+      looking straight down while moving smoothly forward. A war-affected environment with
+      burned and blackened areas on the ground and a harsh conflict-zone atmosphere.
+    negative_prompt: >
+      Cartoon, CGI, Simulation.
+
+  - name: "rain"
+    output_dir: "dataset_rain"
+    fraction: 1.0
+    seed_base: 340
+    prompt: >
+      A photorealistic low-altitude top-down view of an outdoor area, seen from a camera
+      looking straight down while moving smoothly forward. Rainy weather, wet surfaces,
+      and a natural rainy atmosphere across the scene.
+    negative_prompt: >
+      Cartoon, CGI, Simulation.
+
+  - name: "light_snow"
+    output_dir: "dataset_light_snow"
+    fraction: 1.0
+    seed_base: 440
+    prompt: >
+      A photorealistic low-altitude top-down view of an outdoor area, seen from a camera
+      looking straight down while moving smoothly forward. A lightly snow-covered environment
+      with a natural winter atmosphere.
+    negative_prompt: >
+      Cartoon, CGI, Simulation.
