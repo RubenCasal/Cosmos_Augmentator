@@ -1,163 +1,100 @@
 # cosmos_augmentor
 
-Refactored dataset augmentation pipeline for NVIDIA Cosmos-Transfer2.5 with fully configurable control modalities.
+`cosmos_augmentor` is a data augmentation tool for semantic segmentation datasets generated with Isaac Sim. It uses NVIDIA Cosmos-Transfer2.5 to create new photorealistic variants of synthetic scenes while preserving the original semantic labels required for training segmentation models.
 
-## What This Refactor Adds
+The repository takes an existing dataset of RGB images and semantic labels, optionally enriches the generation with structured control inputs such as segmentation, depth, and edges, and produces new augmented images driven by text prompts. This makes it possible to expand the visual diversity of a synthetic dataset without rebuilding scenes manually in the simulator.
 
-- Independent control configuration for `seg`, `depth`, and `edge`
-- Per-control mode selection: `disabled`, `external`, `on_the_fly`
-- External control validation only when required
-- Separate `input_root` and `output_root`
-- Clear module separation:
-  - config loading and validation
-  - dataset scanning
-  - job creation
-  - payload creation
-  - Cosmos execution
-  - result materialization
-- Per-image timing and fault-tolerant execution (failures do not abort the whole run)
+## Documentation
 
-## Dataset Layout
+- [Installation](documentation/Install.md)
+- [Configuration Reference](documentation/Config.md)
+- [Practical Recommendations](documentation/Recommendations.md)
 
-The input dataset may contain:
+## What This Repository Provides
 
-```text
-<input_root>/<original_dir>/
-  images/
-  labels/
-  depth/
-  edges/
-```
+- Prompt-based augmentation of Isaac Sim semantic segmentation datasets
+- Support for `seg`, `depth`, and `edge` control modalities
+- Independent configuration of each control as `disabled`, `external`, or `on_the_fly`
+- Preservation of semantic labels in the generated dataset outputs
+- Output dataset merging so the final dataset contains both original and augmented samples
 
-Only `images/` is always required.
+## Quick Start
 
-`labels/`, `depth/`, and `edges/` are required only when the corresponding control mode is `external`.
-
-## Configuration
-
-Example structure:
-
-```yaml
-cosmos:
-  repo_root: "/path/to/cosmos-transfer2.5"
-  model: "seg"
-  model_variant: "edge"
-  model_distilled: false
-  disable_guardrails: true
-  resolution: "720"
-  guidance: 2.0
-  num_steps: 24
-  max_frames: 1
-  num_video_frames_per_chunk: 1
-
-  controls:
-    seg:
-      mode: external      # disabled | external | on_the_fly
-      weight: 1.0
-      subdir: "labels"
-      encoding: "rgb"     # rgb (colorize=true) | id (colorize=false)
-    depth:
-      mode: on_the_fly    # disabled | external | on_the_fly
-      weight: 0.9
-      subdir: "depth"
-    edge:
-      mode: disabled      # disabled | external | on_the_fly
-      weight: 1.0
-      subdir: "edges"
-
-dataset:
-  input_root: "/path/to/input_dataset"
-  output_root: "/path/to/output_dataset"
-  original_dir: "."
-  image_subdir: "images"
-  label_subdir: "labels"
-  image_ext: ".png"
-  cache_dir: ".cosmos_control_cache"
-
-augmentations:
-  - name: "sunset"
-    output_dir: "dataset_sunset"
-    fraction: 1.0
-    seed_base: 400
-    prompt: >
-      ...
-    negative_prompt: >
-      ...
-```
-
-## Control Behavior
-
-For each control (`seg`, `depth`, `edge`):
-
-- `external`:
-  - Requires `<input_root>/<original_dir>/<subdir>`
-  - Requires a matching file per image
-  - Sends `control_path` + `control_weight` to Cosmos
-- `on_the_fly`:
-  - Does not require a dataset folder
-  - Sends control block with `control_weight` and no `control_path`
-- `disabled`:
-  - Not used
-  - Omitted from Cosmos payload
-
-## Performance Notes
-
-- If Python API import succeeds, models are initialized once and reused for the whole run.
-- If the tool must use subprocess mode, it executes the selected samples in one inference process to avoid reloading models per image.
-- If one sample causes an error in that subprocess run, the runner auto-splits internally to isolate bad samples and continue with the rest.
-
-## Installation
-
-```bash
-pip install -e .
-```
-
-## Run
-
-Run augmentations and merge:
+Run the full pipeline, including augmentation and final merge:
 
 ```bash
 python -m cosmos_augmentor.cli --config config/augmentations.yaml run-all
 ```
 
-Run only augmentation stage:
+Run only the augmentation stage:
 
 ```bash
 python -m cosmos_augmentor.cli --config config/augmentations.yaml run-augmentations
 ```
 
-Run only merge stage:
+Run only the final merge stage:
 
 ```bash
 python -m cosmos_augmentor.cli --config config/augmentations.yaml merge
 ```
 
-Optional logging overrides:
+## Examples
 
-```bash
-python -m cosmos_augmentor.cli --config config/augmentations.yaml --log-level INFO --log-file logs/run.log run-all
-```
+All example media can be placed inside `documentation_media/`. The markdown below is ready to use and only needs the final filenames.
 
-## Output
+### Example 1
 
-Per augmentation, generated files are written under:
+**Original image**
 
-```text
-<output_root>/<augmentation.output_dir>/
-  images/
-  <external control subdirs that apply>
-```
+![Original image](documentation_media/original_image_01.png)
 
-Merged output is written to:
+**Snow augmentation**
 
-```text
-<output_root>/complete_dataset/
-  images/
-  <external control subdirs that apply>
-```
+**Prompt example**
 
-## Error Handling
+> Top-down view of an outdoor robotic scene during snowfall, with cold winter lighting, snow accumulation on the ground and vegetation, realistic atmospheric softness, and preserved scene layout.
 
-- Invalid config values raise clear `ConfigError`
-- Missing required dataset/control files raise `DatasetScanError`
-- Cosmos failures raise `CosmosRunnerError` with subprocess stdout/stderr excerpts
+![Snow augmentation](documentation_media/snow_augmentation_01.png)
+
+### Example 2
+
+**Original image**
+
+![Original image](documentation_media/original_image_02.png)
+
+**Sunset augmentation**
+
+**Prompt example**
+
+> Photorealistic top-down view of the same scene at sunset, with warm orange light, long shadows, darker terrain tones, and realistic atmospheric haze while preserving the original spatial structure.
+
+![Sunset augmentation](documentation_media/sunset_augmentation_02.png)
+
+### Example 3
+
+**Original image**
+
+![Original image](documentation_media/original_image_03.png)
+
+**Overcast augmentation**
+
+**Prompt example**
+
+> Photorealistic aerial view of the same scene under an overcast sky, with soft diffuse lighting, muted contrast, damp ground appearance, and preserved object boundaries and layout.
+
+![Overcast augmentation](documentation_media/overcast_augmentation_03.png)
+
+## Output Structure
+
+Each augmentation writes its generated images into its own output directory. After the merge step, the final dataset is stored under `complete_dataset/`, combining:
+
+- Original images
+- Original labels
+- Augmented images
+- The corresponding segmentation labels for every generated image
+
+## Notes
+
+- This project is designed around image-based augmentation workflows, where `max_frames = 1` and `num_video_frames_per_chunk = 1`.
+- External controls are only required when the corresponding modality is configured as `external`.
+- Depth controls are adapted internally so they match the depth convention expected by Cosmos.
