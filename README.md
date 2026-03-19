@@ -44,47 +44,39 @@ The following example uses `orig1.png` and its generated variants stored in `doc
 
 ### Original image
 
-![Original image](documentation_media/orig1.png)
+<img src="documentation_media/orig1.png" width="80%">
 
 **Snow augmentation**
 
 **Prompt example**
 
-> Top-down view of an outdoor robotic scene during snowfall, with cold winter lighting, snow accumulation on the ground and vegetation, realistic atmospheric softness, and preserved scene layout.
+> A photorealistic low-altitude top-down view of an outdoor area, seen from a camera looking straight down while moving smoothly forward. A lightly snow-covered environment with a natural winter atmosphere.
 
-![Snow augmentation](documentation_media/snow1.png)
+<img src="documentation_media/snow1.png" width="80%">
 
 **Sunset augmentation**
 
 **Prompt example**
 
-> Photorealistic top-down view of the same scene at sunset, with warm orange light, long shadows, darker terrain tones, and realistic atmospheric haze while preserving the original spatial structure.
+> A photorealistic low-altitude top-down view of an outdoor area, seen from a camera looking straight down while moving smoothly forward. Warm late-afternoon warm light, softer shadows, and a natural sunset atmosphere across the scene.
 
-![Sunset augmentation](documentation_media/sunset1.png)
-
-**Rain augmentation**
-
-**Prompt example**
-
-> Photorealistic top-down view of the same scene during rainfall, with wet surfaces, soft atmospheric haze, darker terrain tones, and preserved layout and object boundaries.
-
-![Rain augmentation](documentation_media/rain1.png)
+<img src="documentation_media/sunset1.png" width="80%">
 
 **Dry augmentation**
 
 **Prompt example**
 
-> Photorealistic top-down view of the same scene in dry weather, with clean visibility, balanced daylight, realistic ground texture, and preserved semantic structure.
+> A photorealistic low-altitude top-down view of an outdoor area, seen from a camera looking straight down while moving smoothly forward. A very dry environment with a dry-season appearance, sun-exposed ground, and a naturally dry atmosphere.
 
-![Dry augmentation](documentation_media/dry1.png)
+<img src="documentation_media/dry1.png" width="80%">
 
 **Warm augmentation**
 
 **Prompt example**
 
-> Photorealistic top-down view of the same scene under warm late-afternoon light, with rich earthy tones, soft shadows, and preserved spatial structure.
+> A photorealistic low-altitude top-down view of an outdoor area, seen from a camera looking straight down while moving smoothly forward. A war-affected environment with burned and blackened areas on the ground and a harsh conflict-zone atmosphere.
 
-![Warm augmentation](documentation_media/war1.png)
+<img src="documentation_media/war1.png" width="80%">
 
 ## Output Structure
 
