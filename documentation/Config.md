@@ -10,10 +10,10 @@ This repository is configured through a YAML file, typically `config/augmentatio
 - `model_distilled`: Enables distilled mode. Allowed values: `true`, `false`.
 - `disable_guardrails`: Disables Cosmos guardrails. Allowed values: `true`, `false`.
 - `resolution`: Target Cosmos resolution, typically a string such as `"720"`.
-- `guidance`: Guidance scale. This repository validates it as numeric.
+- `guidance`: Guidance scale. This repository validates it as an integer.
 - `num_steps`: Number of inference steps. This repository validates it as an integer.
 - `max_frames`: Maximum number of frames. For this tool it should normally be `1`.
-- `num_video_frames_per_chunk`: Cosmos chunk size. For this tool it should normally be `1`.
+- `num_video_frames_per_chunk`: Cosmos chunk size. For this tool it should `1`.
 
 ## Control Parameters
 
@@ -47,12 +47,11 @@ The repository automatically adapts depth and edge inputs to a Cosmos-compatible
 - `label_subdir`: Folder containing semantic labels. Common value: `"labels"`.
 - `image_ext`: File extension used to match dataset files. Common value: `".png"`.
 - `cache_dir`: Internal cache folder for adapted controls. Common value: `".cosmos_control_cache"`.
-- `augmentations[].name`: Name of the augmentation profile.
-- `augmentations[].output_dir`: Output directory created for that augmentation.
-- `augmentations[].fraction`: Fraction of the dataset to sample. Validated range: `0.0` to `1.0`.
-- `augmentations[].seed_base`: Base integer seed used to generate deterministic per-image seeds.
-- `augmentations[].prompt`: Positive prompt. Must be a non-empty string.
-- `augmentations[].negative_prompt`: Negative prompt. Must be a non-empty string.
+- `augmentations.name`: Name of the augmentation profile.
+- `augmentations.fraction`: Fraction of the dataset to sample. Validated range: `0.0` to `1.0`.
+- `augmentations.seed_base`: Base integer seed used to generate deterministic per-image seeds.
+- `augmentations.prompt`: Positive prompt. Must be a non-empty string.
+- `augmentations.negative_prompt`: Negative prompt. Must be a non-empty string.
 
 ## Minimal Example
 
