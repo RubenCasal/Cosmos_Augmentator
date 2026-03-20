@@ -1,10 +1,12 @@
 # COSMOS DATA AUGMENTATOR
 
-<img src="documentation_media/augmentation_demo.gif" alt="Demo" width="80%">
-
 `cosmos_augmentor` is a data augmentation tool for semantic segmentation datasets generated with Isaac Sim. It uses NVIDIA Cosmos-Transfer2.5 to create new photorealistic variants of synthetic scenes while preserving the original semantic labels required for training segmentation models.
 
 The repository takes an existing dataset of RGB images and semantic labels, optionally enriches the generation with structured control inputs such as segmentation, depth, and edges, and produces new augmented images driven by text prompts. This makes it possible to expand the visual diversity of a synthetic dataset without rebuilding scenes manually in the simulator.
+
+<p align="center">
+<img src="documentation_media/augmentation_demo.gif" alt="Demo" width="80%">
+</p>
 
 ## Documentation
 
@@ -26,18 +28,6 @@ Run the full pipeline, including augmentation and final merge:
 
 ```bash
 python -m cosmos_augmentor.cli --config config/augmentations.yaml run-all
-```
-
-Run only the augmentation stage:
-
-```bash
-python -m cosmos_augmentor.cli --config config/augmentations.yaml run-augmentations
-```
-
-Run only the final merge stage:
-
-```bash
-python -m cosmos_augmentor.cli --config config/augmentations.yaml merge
 ```
 
 ## Examples
@@ -80,15 +70,7 @@ The following example uses `orig1.png` and its generated variants stored in `doc
   <img src="documentation_media/dry1.png" width="80%">
 </p>
 
-**Warm augmentation**
 
-**Prompt example**
-
-> A photorealistic low-altitude top-down view of an outdoor area, seen from a camera looking straight down while moving smoothly forward. A war-affected environment with burned and blackened areas on the ground and a harsh conflict-zone atmosphere.
-
-<p align="center">
-  <img src="documentation_media/war1.png" width="80%">
-</p>
 
 ## Output Structure
 
